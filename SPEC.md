@@ -7,6 +7,24 @@
 - 舊專案來源：`/Users/css_mac_m2/Documents/GitHub/shop_app`
 - 配套總體規劃：[REQUIREMENTS.md](REQUIREMENTS.md)
 - 本 SPEC 以已檢視的舊專案程式碼與使用者最新決定為基準；未確認的行為標示為待決，不自行補成既有規則。
+- 以下需求與驗收條件描述目標；目前完成程度以「實作進度」為準。
+
+## 實作進度
+
+截至 2026-11-13，本專案已完成以下部分，尚未代表第一階段全部完成：
+
+- **本機資料基礎**：使用 `sqflite` 建立版本 1 schema、啟用 foreign keys，包含菜單、訂單、明細、outbox 和同步中繼資料表。資料層可在同一 transaction 建立訂單、明細與 `PENDING_SYNC` outbox，並有持久化及回滾測試；此操作尚未接入點餐畫面。
+- **菜單快取**：啟動時先讀取 SQLite；首次離線且尚無成功的雲端可見快照時，載入 bundled 舊菜單並標示來源。成功抓取雲端可見菜單後，以 transaction 替換本機快取；抓取或寫入失敗保留先前資料。成功取得空快照後，離線重啟不會重新載入預設菜單。
+- **菜單雲端讀取**：分頁讀取目前帳號可見的菜單；訂閱 `menu_items`、`categories` 的 Realtime 變更後重新抓取快照，並在訂閱成功、回到前景、手動重新整理及每分鐘定期核對。AppBar 顯示快取／同步與 Realtime 連線狀態。
+- **選餐畫面**：依舊版分成三欄，顯示品名、整數單價及數字數量輸入，主食以黃色標示；可查看已選品項、調整數量並計算總額。手機窄畫面可橫向捲動菜單，購物籃和總額位於 AppBar。
+- **選餐衝突提示**：購物籃保留選擇當下的品名與單價；若可見菜單中的品項名稱、價格、供應狀態改變或品項不再可見，提示檢查並禁止繼續增加該品項，店員可移除後重新選擇。
+- **既有訂單列表**：已設定 Supabase 時可從 AppBar 開啟既有雲端訂單列表，讀取受 RLS 限制；該列表不是 SQLite 離線訂單查詢。
+
+尚未完成：點餐選項、從畫面建立／修改／刪除訂單、本機訂單查詢、訂單與明細雲端快照同步、outbox 上傳與重試、菜單編輯、藍牙列印、歷史資料匯入及正式店家授權。購物籃目前只存在記憶體，App 重啟後清空，也不會自動建立或上傳訂單。
+
+目前匿名菜單政策只顯示可供應且分類啟用的品項；因此快取是**可見菜單**而非完整雲端菜單，不能區分停售、權限隱藏與刪除。`seed_menu.sql` 只在雲端菜單為空時匯入，不覆寫既有雲端菜單；實際套用 migration 與匯入資料需在目標 Supabase 專案執行。
+
+與舊版比較的前提：只比較目前已實作的菜單瀏覽及選餐，不視為完整舊版流程。舊版長按修改本機菜單；新版尚未提供編輯，雲端改價時改為保留購物籃快照並提示，原因是避免靜默變更已選價格。此差異仍待店家核可；驗收案例為選入品項後在雲端改價，確認原總額不變、顯示需確認且可移除重選。
 
 ## 1. 目標與決策
 
@@ -102,7 +120,7 @@ SQLite 必須啟用 foreign keys；寫入一筆訂單及其所有明細、outbox
 - `orders`、`order_items`：保存訂單及明細，遠端 UUID 是新系統識別碼；Mongo ObjectId 以 nullable `legacy_id` 保存。
 - 若分類表不是舊菜單實際概念，不得用分類重構取代 `row` 分列，除非另經確認。
 
-現有初始 migration 只把 `orders` 加入 Realtime publication。實作完整菜單及訂單明細同步前，需新增 migration 將 `menu_items`、`order_items`（以及實際使用的分類表）加入 publication，並補足 `updated_at`、冪等寫入鍵與必要 RLS policy；已套用的 migration 不可直接改寫，應新增後續 migration。
+初始 migration 將 `orders` 加入 Realtime publication；後續 migration 已加入 `menu_items` 與 `categories`。完整訂單明細同步仍需另將 `order_items` 加入 publication，並依實際同步設計補足 `updated_at`、冪等寫入鍵與必要 RLS policy；已套用的 migration 不可直接改寫，應新增後續 migration。
 
 ### 同步流程
 
@@ -122,7 +140,7 @@ SQLite 必須啟用 foreign keys；寫入一筆訂單及其所有明細、outbox
 | 菜單 `_id` / 訂單 `_id` / 明細 `_id` | `legacy_id` | 保存舊 Mongo ObjectId 字串；新系統另用 UUID 主鍵 |
 | 菜單 `sid` | `sid` | 整數識別值；未確認唯一性/關聯前不加 unique 或 foreign key |
 | 菜單 `type`、`row` | `item_type`、`menu_row` | 保留原值和分列順序 |
-| 菜單 `name`、`subName` | `name`、`display_name` 或副名稱欄位 | 顯示組合方式待 UI 盤點確認，不丟棄副名稱 |
+| 菜單 `name`、`subName` | SQLite `name`、`sub_name`；Supabase `name`、`display_name` | 目前 `display_name` 保存原始副名稱；畫面顯示 `name`，副名稱非空時接上 `-subName` |
 | 菜單 `price` | `price` | 整數，不轉為浮點金額 |
 | 菜單 `disabled` | `is_available` | `is_available = !disabled` |
 | 訂單 `totalPrice`、`getPay` | `total_price`、`get_pay` | 整數；保留原始值，不重新計算歷史訂單 |
@@ -177,10 +195,10 @@ SQLite 必須啟用 foreign keys；寫入一筆訂單及其所有明細、outbox
 
 ## 11. 分階段交付
 
-1. **資料層**：SQLite schema/migrations、JSON 初始菜單、欄位映射與資料庫測試。
-2. **離線 UI**：菜單瀏覽、選餐、建立訂單、訂單明細、修改/刪除及歷史查詢全部以 SQLite 運作。
-3. **雲端讀取同步**：Supabase 初始快照、菜單/訂單/明細 Realtime、SQLite transaction 套用與重連核對。
-4. **雲端寫入與離線佇列**：本機 outbox、冪等重試、同步狀態和錯誤恢復。
-5. **周邊功能**：藍牙列印、舊資料匯入及正式店家授權方案。
+1. **資料層（部分完成）**：已建立 SQLite 版本 1 schema、JSON 初始菜單、欄位映射及資料庫測試；訂單建立資料層尚未接入 UI。
+2. **離線 UI（部分完成）**：已支援菜單瀏覽、選餐、數量與總額；建立訂單、訂單明細、修改/刪除及歷史查詢尚未完成。
+3. **雲端讀取同步（部分完成）**：已實作目前帳號可見菜單的快照、Realtime 觸發與重新核對；訂單及明細同步至 SQLite 尚未完成。
+4. **雲端寫入與離線佇列（部分完成）**：已有本機 outbox 表及訂單 transaction；雲端上傳、冪等重試與同步狀態 UI 尚未完成。
+5. **周邊功能（未完成）**：藍牙列印、舊資料匯入及正式店家授權方案。
 
 每一階段都需以已確認的舊流程為驗收基準，並在任何邏輯、欄位格式、必填條件或錯誤處理改變時記錄差異。
