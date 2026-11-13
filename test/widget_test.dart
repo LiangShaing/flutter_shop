@@ -15,6 +15,7 @@ import 'package:flutter_shop/main.dart';
 import 'package:flutter_shop/cart_controller.dart';
 import 'package:flutter_shop/menu_controller.dart';
 import 'package:flutter_shop/menu_page.dart';
+import 'package:flutter_shop/order_options.dart';
 import 'package:flutter_shop/orders_page.dart';
 
 void main() {
@@ -314,6 +315,110 @@ void main() {
     await tester.pump();
     expect(cart.quantity, 12);
     expect(find.text('NT\$ 300'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('sets legacy ingredient and spice options in the third column', (tester) async {
+    tester.view.physicalSize = const Size(1024, 768);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final cart = CartController();
+    addTearDown(cart.dispose);
+    await tester.pumpWidget(
+      cartScreen(
+        cart: cart,
+        items: [
+          {...menuItem(id: '3', name: '紅茶', price: 25), 'menu_row': '3'},
+        ],
+      ),
+    );
+    expect(tester.widget<Checkbox>(find.byKey(const ValueKey('option:不加酸菜'))).value, isFalse);
+    expect(tester.widget<Checkbox>(find.byKey(const ValueKey('option:不加薑絲'))).value, isFalse);
+    expect(tester.widget<Checkbox>(find.byKey(const ValueKey('option:不辣'))).value, isTrue);
+    await tester.tap(find.byKey(const ValueKey('option:不加酸菜')));
+    await tester.tap(find.byKey(const ValueKey('option:不加薑絲')));
+    await tester.tap(find.byKey(const ValueKey('option:中辣')));
+    await tester.pump();
+    expect(cart.options.sauerkraut, isFalse);
+    expect(cart.options.ginger, isFalse);
+    expect(cart.options.spiceLevel, 2);
+    expect(tester.widget<Checkbox>(find.byKey(const ValueKey('option:不辣'))).value, isFalse);
+    expect(tester.widget<Checkbox>(find.byKey(const ValueKey('option:中辣'))).value, isTrue);
+    await tester.tap(find.byKey(const ValueKey('option:中辣')));
+    await tester.pump();
+    expect(cart.options.spiceLevel, 2);
+  });
+
+  testWidgets('retains service type and mark after closing the selected-items sheet', (tester) async {
+    tester.view.physicalSize = const Size(320, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final cart = CartController();
+    addTearDown(cart.dispose);
+    final item = menuItem(id: '1', name: '米粉', price: 50);
+    cart.add(item);
+    await tester.pumpWidget(cartScreen(cart: cart, items: [item]));
+    await tester.tap(find.byTooltip('查看已選'));
+    await tester.pumpAndSettle();
+    expect(cart.options.serviceType, isNull);
+    await tester.tap(find.text('外帶'));
+    await tester.pump();
+    expect(cart.options.serviceType, ServiceType.takeout);
+    await tester.tap(find.text('Uber'));
+    await tester.pump();
+    expect(cart.options.serviceType, ServiceType.uber);
+    await tester.enterText(find.byKey(const ValueKey('order-mark')), '少湯');
+    await tester.pump();
+    expect(cart.options.mark, '少湯');
+    expect(tester.takeException(), isNull);
+    Navigator.of(tester.element(find.text('已選品項'))).pop();
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('查看已選'));
+    await tester.pumpAndSettle();
+    expect(find.text('少湯'), findsOneWidget);
+    expect(cart.options.serviceType, ServiceType.uber);
+  });
+
+  testWidgets('order options remain usable with a keyboard and enlarged text', (tester) async {
+    tester.view.physicalSize = const Size(320, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetViewInsets);
+    final cart = CartController();
+    addTearDown(cart.dispose);
+    final item = menuItem(id: '1', name: '米粉', price: 50);
+    cart.add(item);
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(context).copyWith(textScaler: const TextScaler.linear(2)),
+          child: child!,
+        ),
+        home: Scaffold(
+          appBar: AppBar(
+            actions: [
+              MenuCartAction(cart: cart, currentMenu: () => [item]),
+            ],
+          ),
+          body: MenuView(state: MenuSyncState.synced, items: [item], cart: cart),
+        ),
+      ),
+    );
+    await tester.tap(find.byTooltip('查看已選'));
+    await tester.pumpAndSettle();
+    tester.view.viewInsets = const FakeViewPadding(bottom: 260);
+    await tester.pump();
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('order-mark')),
+      100,
+      scrollable: find.descendant(of: find.byType(BottomSheet), matching: find.byType(Scrollable)),
+    );
+    await tester.enterText(find.byKey(const ValueKey('order-mark')), '備註');
+    await tester.pump();
+    expect(cart.options.mark, '備註');
     expect(tester.takeException(), isNull);
   });
 

@@ -2,6 +2,8 @@ import 'dart:collection';
 
 import 'package:flutter/foundation.dart';
 
+import 'order_options.dart';
+
 String cartItemKey(Map<String, Object?> item) {
   final legacyId = item['legacy_id'] as String?;
   return legacyId == null ? 'id:${item['id']}' : 'legacy:$legacyId';
@@ -18,6 +20,13 @@ class CartItem {
 
 class CartController extends ChangeNotifier {
   final Map<String, CartItem> _items = {};
+  final OrderOptions options = OrderOptions();
+
+  @override
+  void dispose() {
+    options.dispose();
+    super.dispose();
+  }
 
   UnmodifiableMapView<String, CartItem> get items => UnmodifiableMapView(_items);
   int get total => _items.values.fold(0, (total, item) => total + item.total);

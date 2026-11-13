@@ -8,6 +8,7 @@ import 'cart_controller.dart';
 import 'local_database.dart';
 import 'main.dart' show SupabaseSetupPage;
 import 'menu_controller.dart';
+import 'order_options.dart';
 import 'orders_page.dart';
 
 class MenuPage extends StatefulWidget {
@@ -288,60 +289,86 @@ void _showSelectedItems(
     showDragHandle: true,
     isScrollControlled: true,
     builder: (context) => ListenableBuilder(
-      listenable: Listenable.merge([cart, ?menuUpdates]),
+      listenable: Listenable.merge([cart, cart.options, ?menuUpdates]),
       builder: (context, _) => SafeArea(
-        child: SizedBox(
-          height: MediaQuery.sizeOf(context).height * 0.65,
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-                child: Row(
-                  children: [
-                    Expanded(child: Text('已選品項', style: Theme.of(context).textTheme.titleLarge)),
-                    Text('NT\$ ${cart.total}', style: Theme.of(context).textTheme.titleMedium),
-                  ],
+        child: Padding(
+          padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+          child: SizedBox(
+            height: (MediaQuery.sizeOf(context).height - MediaQuery.viewInsetsOf(context).bottom) * 0.75,
+            child: ListView(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                  child: Row(
+                    children: [
+                      Expanded(child: Text('已選品項', style: Theme.of(context).textTheme.titleLarge)),
+                      Text('NT\$ ${cart.total}', style: Theme.of(context).textTheme.titleMedium),
+                    ],
+                  ),
                 ),
-              ),
-              Expanded(
-                child: cart.items.isEmpty
-                    ? const Center(child: Text('尚未選餐'))
-                    : ListView(
-                        children: cart.items.entries.map((entry) {
-                          final selected = entry.value;
-                          final item = selected.snapshot;
-                          final conflict = cart.hasConflict(selected, currentMenu());
-                          final subName = item['sub_name'] as String;
-                          final name = '${item['name']}${subName.isEmpty ? '' : '-$subName'}';
-                          return ListTile(
-                            title: Text(name),
-                            subtitle: Text(conflict ? '菜單已變更或停售，請移除後重新選擇' : '單價 NT\$ ${item['price']}'),
-                            trailing: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                IconButton(
-                                  tooltip: '減少 $name',
-                                  onPressed: () => cart.removeOne(entry.key),
-                                  icon: const Icon(Icons.remove_circle_outline),
-                                ),
-                                SizedBox(width: 28, child: Text('${selected.quantity}', textAlign: TextAlign.center)),
-                                IconButton(
-                                  tooltip: '增加 $name',
-                                  onPressed: conflict ? null : () => cart.add(item),
-                                  icon: const Icon(Icons.add_circle_outline),
-                                ),
-                                IconButton(
-                                  tooltip: '移除 $name',
-                                  onPressed: () => cart.removeItem(entry.key),
-                                  icon: const Icon(Icons.delete_outline),
-                                ),
-                              ],
-                            ),
-                          );
-                        }).toList(),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                  child: SegmentedButton<ServiceType>(
+                    segments: const [
+                      ButtonSegment(value: ServiceType.dineIn, label: Text('內用')),
+                      ButtonSegment(value: ServiceType.takeout, label: Text('外帶')),
+                      ButtonSegment(value: ServiceType.uber, label: Text('Uber')),
+                    ],
+                    selected: {if (cart.options.serviceType != null) cart.options.serviceType!},
+                    emptySelectionAllowed: true,
+                    onSelectionChanged: (selection) =>
+                        cart.options.setServiceType(selection.isEmpty ? null : selection.single),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                  child: TextFormField(
+                    key: const ValueKey('order-mark'),
+                    initialValue: cart.options.mark,
+                    onChanged: cart.options.setMark,
+                    decoration: const InputDecoration(labelText: '標註 / 備註'),
+                  ),
+                ),
+                if (cart.items.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.all(24),
+                    child: Center(child: Text('尚未選餐')),
+                  )
+                else
+                  ...cart.items.entries.map((entry) {
+                    final selected = entry.value;
+                    final item = selected.snapshot;
+                    final conflict = cart.hasConflict(selected, currentMenu());
+                    final subName = item['sub_name'] as String;
+                    final name = '${item['name']}${subName.isEmpty ? '' : '-$subName'}';
+                    return ListTile(
+                      title: Text(name),
+                      subtitle: Text(conflict ? '菜單已變更或停售，請移除後重新選擇' : '單價 NT\$ ${item['price']}'),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            tooltip: '減少 $name',
+                            onPressed: () => cart.removeOne(entry.key),
+                            icon: const Icon(Icons.remove_circle_outline),
+                          ),
+                          SizedBox(width: 28, child: Text('${selected.quantity}', textAlign: TextAlign.center)),
+                          IconButton(
+                            tooltip: '增加 $name',
+                            onPressed: conflict ? null : () => cart.add(item),
+                            icon: const Icon(Icons.add_circle_outline),
+                          ),
+                          IconButton(
+                            tooltip: '移除 $name',
+                            onPressed: () => cart.removeItem(entry.key),
+                            icon: const Icon(Icons.delete_outline),
+                          ),
+                        ],
                       ),
-              ),
-            ],
+                    );
+                  }),
+              ],
+            ),
           ),
         ),
       ),
@@ -408,17 +435,20 @@ class _MenuViewState extends State<MenuView> {
                               final rowItems = items.where((item) => item['menu_row'] == row);
                               return Expanded(
                                 child: Column(
-                                  children: rowItems.map((item) {
-                                    final selected = _cart.items[cartItemKey(item)];
-                                    final conflict = selected != null && _cart.hasConflict(selected, items);
-                                    return _MenuTableRow(
-                                      key: ValueKey(cartItemKey(item)),
-                                      item: item,
-                                      quantity: _cart.quantityFor(item),
-                                      conflict: conflict,
-                                      onQuantityChanged: (quantity) => _cart.setQuantity(item, quantity),
-                                    );
-                                  }).toList(),
+                                  children: [
+                                    ...rowItems.map((item) {
+                                      final selected = _cart.items[cartItemKey(item)];
+                                      final conflict = selected != null && _cart.hasConflict(selected, items);
+                                      return _MenuTableRow(
+                                        key: ValueKey(cartItemKey(item)),
+                                        item: item,
+                                        quantity: _cart.quantityFor(item),
+                                        conflict: conflict,
+                                        onQuantityChanged: (quantity) => _cart.setQuantity(item, quantity),
+                                      );
+                                    }),
+                                    if (row == '3') _IngredientOptions(options: _cart.options),
+                                  ],
                                 ),
                               );
                             }).toList(),
@@ -432,6 +462,55 @@ class _MenuViewState extends State<MenuView> {
       ),
     );
   }
+}
+
+class _IngredientOptions extends StatelessWidget {
+  const _IngredientOptions({required this.options});
+
+  final OrderOptions options;
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: options,
+    builder: (context, _) => Column(
+      children: [
+        _optionRow('不加酸菜', options.excludeSauerkraut, (value) => options.setExcludeSauerkraut(value)),
+        _optionRow('不加薑絲', options.excludeGinger, (value) => options.setExcludeGinger(value)),
+        for (final (index, label) in ['不辣', '小辣', '中辣', '大辣'].indexed)
+          _optionRow(label, options.spiceLevel == index, (value) {
+            if (value) options.setSpiceLevel(index);
+          }),
+      ],
+    ),
+  );
+
+  Widget _optionRow(String label, bool selected, ValueChanged<bool> onChanged) => Container(
+    height: 40,
+    decoration: BoxDecoration(border: Border.all(color: Colors.black, width: 0.5)),
+    child: Row(
+      children: [
+        Expanded(
+          flex: 9,
+          child: Center(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(label, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
+            ),
+          ),
+        ),
+        Expanded(
+          flex: 3,
+          child: Checkbox(
+            key: ValueKey('option:$label'),
+            value: selected,
+            onChanged: (value) => onChanged(value ?? false),
+            semanticLabel: label,
+            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
+        ),
+      ],
+    ),
+  );
 }
 
 class _MenuTableRow extends StatelessWidget {
