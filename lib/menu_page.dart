@@ -323,6 +323,30 @@ void _showSelectedItems(
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
                   child: TextFormField(
+                    key: const ValueKey('order-payment'),
+                    initialValue: cart.options.paymentInput,
+                    onChanged: cart.options.setPaymentInput,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    decoration: InputDecoration(
+                      labelText: '實收金額',
+                      prefixIcon: const Icon(Icons.payments_outlined),
+                      errorText: cart.options.receivedAmount == null ? '金額過大，請重新輸入' : null,
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                  child: Text(
+                    cart.options.changeFor(cart.total) == null
+                        ? '找零：--'
+                        : '找零：NT\$ ${cart.options.changeFor(cart.total)}',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                  child: TextFormField(
                     key: const ValueKey('order-mark'),
                     initialValue: cart.options.mark,
                     onChanged: cart.options.setMark,

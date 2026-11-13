@@ -9,6 +9,7 @@ void main() {
     expect(options.ginger, isTrue);
     expect(options.spiceLevel, 0);
     expect(options.mark, isEmpty);
+    expect(options.receivedAmount, 0);
     options.dispose();
   });
 
@@ -30,6 +31,34 @@ void main() {
     expect(notifications, 6);
     expect(() => options.setSpiceLevel(4), throwsRangeError);
     expect(options.spiceLevel, 2);
+    options.dispose();
+  });
+
+  test('calculates legacy change without inferring payment status', () {
+    final options = OrderOptions();
+    expect(options.changeFor(120), 0);
+    options.setPaymentInput('100');
+    expect(options.receivedAmount, 100);
+    expect(options.changeFor(120), 0);
+    options.setPaymentInput('120');
+    expect(options.changeFor(120), 0);
+    options.setPaymentInput('150');
+    expect(options.changeFor(120), 30);
+    options.setServiceType(ServiceType.uber);
+    expect(options.changeFor(120), 30);
+    options.setPaymentInput('');
+    expect(options.receivedAmount, 0);
+    expect(options.changeFor(120), 0);
+    options.dispose();
+  });
+
+  test('rejects invalid values and flags amounts too large to parse', () {
+    final options = OrderOptions();
+    expect(() => options.setPaymentInput('-1'), throwsFormatException);
+    expect(() => options.setPaymentInput('1.5'), throwsFormatException);
+    options.setPaymentInput('999999999999999999999999999999');
+    expect(options.receivedAmount, isNull);
+    expect(options.changeFor(100), isNull);
     options.dispose();
   });
 }

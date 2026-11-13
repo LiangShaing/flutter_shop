@@ -412,14 +412,87 @@ void main() {
     tester.view.viewInsets = const FakeViewPadding(bottom: 260);
     await tester.pump();
     await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('order-payment')),
+      100,
+      scrollable: find.descendant(of: find.byType(BottomSheet), matching: find.byType(Scrollable)).first,
+    );
+    await tester.enterText(find.byKey(const ValueKey('order-payment')), '150');
+    await tester.pump();
+    expect(cart.options.receivedAmount, 150);
+    expect(cart.options.changeFor(cart.total), 100);
+    await tester.scrollUntilVisible(
       find.byKey(const ValueKey('order-mark')),
       100,
-      scrollable: find.descendant(of: find.byType(BottomSheet), matching: find.byType(Scrollable)),
+      scrollable: find.descendant(of: find.byType(BottomSheet), matching: find.byType(Scrollable)).first,
     );
     await tester.enterText(find.byKey(const ValueKey('order-mark')), '備註');
     await tester.pump();
     expect(cart.options.mark, '備註');
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('calculates change and keeps received amount across service changes and reopening', (tester) async {
+    final cart = CartController();
+    addTearDown(cart.dispose);
+    final item = menuItem(id: '1', name: '米粉', price: 50);
+    cart.setQuantity(item, 2);
+    await tester.pumpWidget(cartScreen(cart: cart, items: [item]));
+    await tester.tap(find.byTooltip('查看已選'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Uber'));
+    await tester.pump();
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('order-payment')),
+      100,
+      scrollable: find.descendant(of: find.byType(BottomSheet), matching: find.byType(Scrollable)).first,
+    );
+    await tester.enterText(find.byKey(const ValueKey('order-payment')), '150');
+    await tester.pump();
+    expect(cart.options.receivedAmount, 150);
+    expect(cart.options.serviceType, ServiceType.uber);
+    expect(find.text('找零：NT\$ 50'), findsOneWidget);
+    cart.setQuantity(item, 3);
+    await tester.pump();
+    expect(find.text('找零：NT\$ 0'), findsOneWidget);
+    Navigator.of(tester.element(find.byKey(const ValueKey('order-payment')))).pop();
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('查看已選'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('order-payment')),
+      100,
+      scrollable: find.descendant(of: find.byType(BottomSheet), matching: find.byType(Scrollable)).first,
+    );
+    expect(find.text('150'), findsOneWidget);
+    expect(find.text('找零：NT\$ 0'), findsOneWidget);
+  });
+
+  testWidgets('clearing and oversized received amounts do not leave a stale change', (tester) async {
+    final cart = CartController();
+    addTearDown(cart.dispose);
+    final item = menuItem(id: '1', name: '米粉', price: 50);
+    cart.add(item);
+    await tester.pumpWidget(cartScreen(cart: cart, items: [item]));
+    await tester.tap(find.byTooltip('查看已選'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('order-payment')),
+      100,
+      scrollable: find.descendant(of: find.byType(BottomSheet), matching: find.byType(Scrollable)).first,
+    );
+    await tester.enterText(find.byKey(const ValueKey('order-payment')), '100');
+    await tester.pump();
+    expect(find.text('找零：NT\$ 50'), findsOneWidget);
+    await tester.enterText(find.byKey(const ValueKey('order-payment')), '999999999999999999999999999999');
+    await tester.pump();
+    expect(find.text('金額過大，請重新輸入'), findsOneWidget);
+    expect(find.text('找零：--'), findsOneWidget);
+    expect(cart.options.receivedAmount, isNull);
+    await tester.enterText(find.byKey(const ValueKey('order-payment')), '');
+    await tester.pump();
+    expect(find.text('金額過大，請重新輸入'), findsNothing);
+    expect(find.text('找零：NT\$ 0'), findsOneWidget);
+    expect(cart.options.receivedAmount, 0);
   });
 
   testWidgets('selects quantities and calculates the total', (tester) async {
