@@ -107,10 +107,7 @@ void main() {
   });
 
   test('rolls back order and outbox when an item is invalid', () async {
-    await expectLater(
-      store.createOrder(order: order(), items: [item(quantity: 0)], operationId: 'operation-1'),
-      throwsA(isA<DatabaseException>()),
-    );
+    await expectLater(store.createOrder(order: order(), items: [item(quantity: 0)], operationId: 'operation-1'), throwsA(isA<DatabaseException>()));
     expect(await store.database.query('orders'), isEmpty);
     expect(await store.database.query('order_items'), isEmpty);
     expect(await store.database.query('sync_outbox'), isEmpty);
@@ -134,10 +131,7 @@ void main() {
   });
 
   test('enforces foreign keys', () async {
-    await expectLater(
-      store.database.insert('order_items', {...item(), 'order_id': 'missing'}),
-      throwsA(isA<DatabaseException>()),
-    );
+    await expectLater(store.database.insert('order_items', {...item(), 'order_id': 'missing'}), throwsA(isA<DatabaseException>()));
   });
 
   test('uses the Taipei calendar day independently of device timezone', () {
@@ -154,22 +148,10 @@ void main() {
       options: OpenDatabaseOptions(
         version: 1,
         onCreate: (database, version) async {
-          await database.execute(
-            'CREATE TABLE orders (id TEXT PRIMARY KEY, order_date TEXT NOT NULL, chili INTEGER NOT NULL, serial INTEGER NOT NULL)',
-          );
+          await database.execute('CREATE TABLE orders (id TEXT PRIMARY KEY, order_date TEXT NOT NULL, chili INTEGER NOT NULL, serial INTEGER NOT NULL)');
           await database.execute('CREATE TABLE order_items (id TEXT PRIMARY KEY)');
-          await database.insert('orders', {
-            'id': 'legacy',
-            'order_date': '2026-11-12T16:00:00Z',
-            'chili': 1,
-            'serial': 10,
-          });
-          await database.insert('orders', {
-            'id': 'ambiguous',
-            'order_date': '2026-11-12T16:00:00',
-            'chili': 0,
-            'serial': 11,
-          });
+          await database.insert('orders', {'id': 'legacy', 'order_date': '2026-11-12T16:00:00Z', 'chili': 1, 'serial': 10});
+          await database.insert('orders', {'id': 'ambiguous', 'order_date': '2026-11-12T16:00:00', 'chili': 0, 'serial': 11});
         },
       ),
     );
@@ -196,9 +178,7 @@ void main() {
         version: 2,
         onCreate: (database, version) async {
           await database.execute('CREATE TABLE order_items (id TEXT PRIMARY KEY, name TEXT NOT NULL)');
-          await database.execute(
-            'CREATE TABLE orders (id TEXT PRIMARY KEY, serial INTEGER NOT NULL, serial_status TEXT NOT NULL)',
-          );
+          await database.execute('CREATE TABLE orders (id TEXT PRIMARY KEY, serial INTEGER NOT NULL, serial_status TEXT NOT NULL, business_date TEXT)');
           await database.insert('order_items', {'id': 'old-item', 'name': '米粉'});
         },
       ),
@@ -222,11 +202,9 @@ void main() {
       options: OpenDatabaseOptions(
         version: 3,
         onCreate: (database, version) async {
-          await database.execute(
-            'CREATE TABLE orders (id TEXT PRIMARY KEY, serial INTEGER NOT NULL, serial_status TEXT NOT NULL)',
-          );
-          await database.insert('orders', {'id': 'pending', 'serial': 10, 'serial_status': 'PROVISIONAL'});
-          await database.insert('orders', {'id': 'legacy', 'serial': 11, 'serial_status': 'UNKNOWN'});
+          await database.execute('CREATE TABLE orders (id TEXT PRIMARY KEY, serial INTEGER NOT NULL, serial_status TEXT NOT NULL, business_date TEXT)');
+          await database.insert('orders', {'id': 'pending', 'serial': 10, 'serial_status': 'PROVISIONAL', 'business_date': '2026-11-13'});
+          await database.insert('orders', {'id': 'legacy', 'serial': 11, 'serial_status': 'UNKNOWN', 'business_date': '2026-11-13'});
         },
       ),
     );
@@ -237,6 +215,7 @@ void main() {
       final legacy = (await upgraded.database.query('orders', where: 'id = ?', whereArgs: ['legacy'])).single;
       expect(pending['provisional_serial'], 10);
       expect(legacy['provisional_serial'], isNull);
+      expect((await upgraded.database.query('daily_serial_counters')).single, {'business_date': '2026-11-13', 'last_serial': 11});
     } finally {
       await upgraded.close();
     }
@@ -265,7 +244,7 @@ void main() {
     expect(detail['menu_legacy_id'], 'legacy-1');
   });
 
-  test('saves provisional serials, four-level spice, snapshots, and outbox atomically', () async {
+  test('saves local official serials, four-level spice, snapshots, and outbox atomically', () async {
     await store.replaceVisibleMenu([remoteMenuItem()]);
     final previousDay = await draftFor(store, DateTime.utc(2026, 11, 12, 15, 59, 59));
     final first = await store.savePendingOrder(previousDay);
@@ -281,7 +260,7 @@ void main() {
     expect(retried.serial, saved.first.serial);
     expect(await store.database.query('orders'), hasLength(3));
     expect(await store.database.query('order_items'), hasLength(3));
-    expect(await store.database.query('sync_outbox'), hasLength(3));
+    expect(await store.database.query('sync_outbox'), isEmpty);
 
     await store.close();
     store = await LocalDatabase.open(factory: databaseFactoryFfi, databasePath: databasePath);
@@ -289,8 +268,9 @@ void main() {
     expect((await store.localOrder(firstToday.id))?['id'], firstToday.id);
     expect(await store.localOrder('missing'), isNull);
     final order = (await store.database.query('orders', where: 'id = ?', whereArgs: [firstToday.id])).single;
-    expect(order['sync_status'], 'PENDING_SYNC');
-    expect(order['serial_status'], 'PROVISIONAL');
+    expect(order['sync_status'], 'LOCAL_ONLY');
+    expect(order['serial_status'], 'ASSIGNED');
+    expect(order['provisional_serial'], isNull);
     expect(order['business_date'], '2026-11-13');
     expect(order['chili'], 1);
     expect(order['chili_level'], 3);
@@ -298,27 +278,27 @@ void main() {
     expect(order['takeout'], 0);
     expect(order['sauerkraut'], 0);
     expect(order['get_pay'], 100);
-    final detail = (await store.database.query(
-      'order_items',
-      where: 'order_id = ?',
-      whereArgs: [firstToday.id],
-    )).single;
+    final detail = (await store.database.query('order_items', where: 'order_id = ?', whereArgs: [firstToday.id])).single;
     expect(detail['show_name'], '湯');
     expect(detail['menu_item_id'], 'cloud-1');
     expect(detail['menu_legacy_id'], 'legacy-1');
     expect(await store.localOrderItems(firstToday.id), hasLength(1));
     expect(detail['price'], 50);
     expect(detail['quantity'], 2);
-    final operation = (await store.database.query(
-      'sync_outbox',
-      where: 'order_id = ?',
-      whereArgs: [firstToday.id],
-    )).single;
-    expect(operation['operation_id'], firstToday.operationId);
-    expect((jsonDecode(operation['payload'] as String)['order'] as Map)['serial_status'], 'PROVISIONAL');
-    final payloadItems = jsonDecode(operation['payload'] as String)['items'] as List;
-    expect(payloadItems.single['menu_item_id'], 'cloud-1');
-    expect(payloadItems.single['menu_legacy_id'], 'legacy-1');
+    expect(await store.pendingOrderOperations(), isEmpty);
+    expect(await store.database.query('sync_outbox'), isEmpty);
+  });
+
+  test('does not reuse a daily serial after deleting the highest-numbered order', () async {
+    await store.replaceVisibleMenu([remoteMenuItem()]);
+    final first = await draftFor(store, DateTime.utc(2026, 11, 13));
+    final second = await draftFor(store, DateTime.utc(2026, 11, 13, 1));
+    expect((await store.savePendingOrder(first)).serial, 10);
+    expect((await store.savePendingOrder(second)).serial, 11);
+    await store.database.delete('orders', where: 'id = ?', whereArgs: [second.id]);
+    final third = await draftFor(store, DateTime.utc(2026, 11, 13, 2));
+    expect((await store.savePendingOrder(third)).serial, 12);
+    expect((await store.database.query('daily_serial_counters')).single['last_serial'], 12);
   });
 
   test('rejects changed menu snapshots without creating an order', () async {
@@ -337,6 +317,7 @@ void main() {
     await store.replaceVisibleMenu([remoteMenuItem()]);
     final draft = await draftFor(store, DateTime.utc(2026, 11, 13));
     final saved = await store.savePendingOrder(draft);
+    await promoteToPendingSync(store, draft);
     final before = (await store.pendingOrderOperations()).single;
     await store.recordOrderSyncFailure(draft.operationId, 'NETWORK');
     final pending = (await store.pendingOrderOperations()).single;
@@ -344,12 +325,7 @@ void main() {
     expect(pending['last_error'], 'NETWORK');
     expect(pending['payload'], before['payload']);
     expect((await store.localOrders()).single['sync_status'], 'SYNC_FAILED');
-    await store.completeOrderSync(
-      operationId: draft.operationId,
-      orderId: draft.id,
-      serial: 14,
-      businessDate: saved.businessDate,
-    );
+    await store.completeOrderSync(operationId: draft.operationId, orderId: draft.id, serial: 14, businessDate: saved.businessDate);
     final order = (await store.localOrders()).single;
     expect(order['serial'], 14);
     expect(order['provisional_serial'], saved.serial);
@@ -362,20 +338,9 @@ void main() {
     await store.replaceVisibleMenu([remoteMenuItem()]);
     final draft = await draftFor(store, DateTime.utc(2026, 11, 13));
     await store.savePendingOrder(draft);
-    for (final (orderId, serial, businessDate) in [
-      ('wrong-order', 10, '2026-11-13'),
-      (draft.id, 9, '2026-11-13'),
-      (draft.id, 10, '2026-11-14'),
-    ]) {
-      await expectLater(
-        store.completeOrderSync(
-          operationId: draft.operationId,
-          orderId: orderId,
-          serial: serial,
-          businessDate: businessDate,
-        ),
-        throwsStateError,
-      );
+    await promoteToPendingSync(store, draft);
+    for (final (orderId, serial, businessDate) in [('wrong-order', 10, '2026-11-13'), (draft.id, 9, '2026-11-13'), (draft.id, 10, '2026-11-14')]) {
+      await expectLater(store.completeOrderSync(operationId: draft.operationId, orderId: orderId, serial: serial, businessDate: businessDate), throwsStateError);
       expect(await store.pendingOrderOperations(), hasLength(1));
       expect((await store.localOrders()).single['serial_status'], 'PROVISIONAL');
     }
@@ -385,18 +350,9 @@ void main() {
     await store.replaceVisibleMenu([remoteMenuItem()]);
     final draft = await draftFor(store, DateTime.utc(2026, 11, 13));
     final saved = await store.savePendingOrder(draft);
-    await store.database.execute(
-      "CREATE TRIGGER reject_outbox_delete BEFORE DELETE ON sync_outbox BEGIN SELECT RAISE(FAIL, 'test'); END",
-    );
-    await expectLater(
-      store.completeOrderSync(
-        operationId: draft.operationId,
-        orderId: draft.id,
-        serial: 14,
-        businessDate: saved.businessDate,
-      ),
-      throwsA(isA<DatabaseException>()),
-    );
+    await promoteToPendingSync(store, draft);
+    await store.database.execute("CREATE TRIGGER reject_outbox_delete BEFORE DELETE ON sync_outbox BEGIN SELECT RAISE(FAIL, 'test'); END");
+    await expectLater(store.completeOrderSync(operationId: draft.operationId, orderId: draft.id, serial: 14, businessDate: saved.businessDate), throwsA(isA<DatabaseException>()));
     final order = (await store.localOrders()).single;
     expect(order['serial'], saved.serial);
     expect(order['serial_status'], 'PROVISIONAL');
@@ -404,17 +360,16 @@ void main() {
     expect(await store.pendingOrderOperations(), hasLength(1));
   });
 
-  test('rolls back the provisional number and order when the outbox insert fails', () async {
+  test('rolls back the daily counter and order when the order insert fails', () async {
     await store.replaceVisibleMenu([remoteMenuItem()]);
     final draft = await draftFor(store, DateTime.utc(2026, 11, 13));
-    await store.database.execute(
-      "CREATE TRIGGER reject_outbox BEFORE INSERT ON sync_outbox BEGIN SELECT RAISE(FAIL, 'test'); END",
-    );
+    await store.database.execute("CREATE TRIGGER reject_order BEFORE INSERT ON orders BEGIN SELECT RAISE(FAIL, 'test'); END");
     await expectLater(store.savePendingOrder(draft), throwsA(isA<DatabaseException>()));
     expect(await store.database.query('orders'), isEmpty);
     expect(await store.database.query('order_items'), isEmpty);
     expect(await store.database.query('sync_outbox'), isEmpty);
-    await store.database.execute('DROP TRIGGER reject_outbox');
+    expect(await store.database.query('daily_serial_counters'), isEmpty);
+    await store.database.execute('DROP TRIGGER reject_order');
     expect((await store.savePendingOrder(draft)).serial, 10);
   });
 
@@ -428,11 +383,7 @@ void main() {
   });
 
   test('sorts local orders by their actual instants across UTC offsets', () async {
-    await store.createOrder(
-      order: {...order(), 'id': 'earlier', 'order_date': '2026-11-13T10:00:00+08:00'},
-      items: [item()],
-      operationId: 'earlier-operation',
-    );
+    await store.createOrder(order: {...order(), 'id': 'earlier', 'order_date': '2026-11-13T10:00:00+08:00'}, items: [item()], operationId: 'earlier-operation');
     await store.createOrder(
       order: {...order(), 'id': 'later', 'order_date': '2026-11-13T03:00:00Z'},
       items: [
@@ -459,6 +410,20 @@ Future<OrderDraft> draftFor(LocalDatabase store, DateTime date) async {
   }
 }
 
+Future<void> promoteToPendingSync(LocalDatabase store, OrderDraft draft) => store.database.transaction((transaction) async {
+  final order = (await transaction.query('orders', where: 'id = ?', whereArgs: [draft.id])).single;
+  final syncOrder = {...order, 'provisional_serial': order['serial'], 'serial_status': 'PROVISIONAL', 'sync_status': 'PENDING_SYNC'};
+  await transaction.update('orders', syncOrder, where: 'id = ?', whereArgs: [draft.id]);
+  final items = await transaction.query('order_items', where: 'order_id = ?', whereArgs: [draft.id]);
+  await transaction.insert('sync_outbox', {
+    'operation_id': draft.operationId,
+    'order_id': draft.id,
+    'operation': 'CREATE',
+    'payload': jsonEncode({'order': syncOrder, 'items': items}),
+    'created_at': syncOrder['created_at'],
+  });
+});
+
 Map<String, Object?> order() => {
   'id': 'order-1',
   'takeout': 0,
@@ -474,15 +439,7 @@ Map<String, Object?> order() => {
   'updated_at': '2026-11-13T10:00:00Z',
 };
 
-Map<String, Object?> item({int quantity = 1}) => {
-  'id': 'item-1',
-  'sid': 2,
-  'item_type': 'product',
-  'name': 'A',
-  'show_name': 'A B',
-  'price': 35,
-  'quantity': quantity,
-};
+Map<String, Object?> item({int quantity = 1}) => {'id': 'item-1', 'sid': 2, 'item_type': 'product', 'name': 'A', 'show_name': 'A B', 'price': 35, 'quantity': quantity};
 
 Map<String, dynamic> remoteMenuItem() => {
   'id': 'cloud-1',

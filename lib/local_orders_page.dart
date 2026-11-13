@@ -16,9 +16,10 @@ String localSerialLabel(Map<String, Object?> order) {
 }
 
 String localSyncLabel(Map<String, Object?> order) => switch (order['sync_status']) {
-  'PENDING_SYNC' => '待同步',
+  'LOCAL_ONLY' => '本機存單，第一階段不上傳',
+  'PENDING_SYNC' => '第二階段待同步',
   'SYNCED' => '已同步',
-  'SYNC_FAILED' => '同步失敗，待處理',
+  'SYNC_FAILED' => '第二階段同步失敗，待處理',
   _ => '同步狀態未知',
 };
 
@@ -65,25 +66,20 @@ class _LocalOrdersPageState extends State<LocalOrdersPage> {
         if (widget.orderSync != null)
           IconButton(
             tooltip: '重試訂單同步',
-            onPressed:
-                widget.orderSync!.state == OrderSyncState.syncing || widget.orderSync!.state == OrderSyncState.loading
-                ? null
-                : () => widget.orderSync!.sync(manual: true),
+            onPressed: widget.orderSync!.state == OrderSyncState.syncing || widget.orderSync!.state == OrderSyncState.loading ? null : () => widget.orderSync!.sync(manual: true),
             icon: const Icon(Icons.sync),
           ),
         IconButton(tooltip: '重新整理本機訂單', onPressed: _syncChanged, icon: const Icon(Icons.refresh)),
         if (widget.client != null)
           IconButton(
             tooltip: '雲端訂單',
-            onPressed: () =>
-                Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => OrdersPage(client: widget.client!))),
+            onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => OrdersPage(client: widget.client!))),
             icon: const Icon(Icons.cloud_outlined),
           )
         else
           IconButton(
             tooltip: 'Supabase 設定',
-            onPressed: () =>
-                Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const SupabaseSetupPage())),
+            onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const SupabaseSetupPage())),
             icon: const Icon(Icons.settings_outlined),
           ),
       ],
@@ -115,20 +111,15 @@ class OrderSyncStatus extends StatelessWidget {
   Widget build(BuildContext context) {
     final controller = sync;
     final label = controller == null
-        ? '未設定 Supabase，本機訂單尚未上傳'
+        ? '第一階段僅存本機；舊的待同步資料會保留'
         : switch (controller.state) {
             OrderSyncState.loading => '載入本機同步佇列',
             OrderSyncState.idle => controller.pendingCount == 0 ? '沒有待同步訂單' : '待同步 ${controller.pendingCount} 筆',
             OrderSyncState.syncing => '訂單同步中 · 待同步 ${controller.pendingCount} 筆',
             OrderSyncState.authRequired => '需要店家登入或授權 · 待同步 ${controller.pendingCount} 筆',
-            OrderSyncState.failed =>
-              controller.lastErrorCode == 'LOCAL_STORAGE'
-                  ? '無法讀取本機佇列，請重試'
-                  : '同步失敗，稍後重試 · 待同步 ${controller.pendingCount} 筆',
+            OrderSyncState.failed => controller.lastErrorCode == 'LOCAL_STORAGE' ? '無法讀取本機佇列，請重試' : '同步失敗，稍後重試 · 待同步 ${controller.pendingCount} 筆',
             OrderSyncState.needsReview =>
-              controller.lastErrorCode == 'MENU_CONFLICT'
-                  ? '菜單已變更，訂單需處理 · 待同步 ${controller.pendingCount} 筆'
-                  : '訂單同步需要處理 · 待同步 ${controller.pendingCount} 筆',
+              controller.lastErrorCode == 'MENU_CONFLICT' ? '菜單已變更，訂單需處理 · 待同步 ${controller.pendingCount} 筆' : '訂單同步需要處理 · 待同步 ${controller.pendingCount} 筆',
           };
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -164,9 +155,7 @@ class LocalOrdersView extends StatelessWidget {
           final order = orders[index];
           return ListTile(
             title: Text(localSerialLabel(order)),
-            subtitle: Text(
-              '${LocalDatabase.taipeiTimestamp(order['order_date'] as String?) ?? order['business_date'] ?? '日期未知'} · ${localSyncLabel(order)}',
-            ),
+            subtitle: Text('${LocalDatabase.taipeiTimestamp(order['order_date'] as String?) ?? order['business_date'] ?? '日期未知'} · ${localSyncLabel(order)}'),
             trailing: Text('NT\$ ${order['total_price']}'),
             onTap: () => onOpen(order),
           );
@@ -260,11 +249,8 @@ class LocalOrderDetailsView extends StatelessWidget {
           padding: const EdgeInsets.all(16),
           children: [
             Text(localSerialLabel(order), style: Theme.of(context).textTheme.titleLarge),
-            Text(
-              '${LocalDatabase.taipeiTimestamp(order['order_date'] as String?) ?? order['business_date'] ?? '日期未知'} · ${localSyncLabel(order)}',
-            ),
-            if (order['serial_status'] == 'ASSIGNED' && order['provisional_serial'] != null)
-              Text('原暫定流水號 ${order['provisional_serial']}'),
+            Text('${LocalDatabase.taipeiTimestamp(order['order_date'] as String?) ?? order['business_date'] ?? '日期未知'} · ${localSyncLabel(order)}'),
+            if (order['serial_status'] == 'ASSIGNED' && order['provisional_serial'] != null) Text('原暫定流水號 ${order['provisional_serial']}'),
             const SizedBox(height: 12),
             Text('$service · 總額 NT\$ ${order['total_price']} · 實收 NT\$ ${order['get_pay']}'),
             Text('酸菜：${order['sauerkraut'] == 1 ? '加' : '不加'} · 薑絲：${order['ginger'] == 1 ? '加' : '不加'} · $spice'),
@@ -277,11 +263,7 @@ class LocalOrderDetailsView extends StatelessWidget {
                 title: Text('${item['name']}${subName.isEmpty ? '' : '-$subName'}'),
                 trailing: SizedBox(
                   width: 120,
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    alignment: Alignment.centerRight,
-                    child: Text('× ${item['quantity'] ?? '未知'}  ·  NT\$ ${item['price']}'),
-                  ),
+                  child: FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerRight, child: Text('× ${item['quantity'] ?? '未知'}  ·  NT\$ ${item['price']}')),
                 ),
               );
             }),

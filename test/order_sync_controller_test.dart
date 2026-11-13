@@ -352,19 +352,9 @@ void main() {
     http.Request? captured;
     final mock = MockClient((request) async {
       captured = request;
-      return http.Response(
-        jsonEncode(acknowledgement(draft.operationId, payload, 10)),
-        200,
-        headers: {'content-type': 'application/json'},
-        request: request,
-      );
+      return http.Response(jsonEncode(acknowledgement(draft.operationId, payload, 10)), 200, headers: {'content-type': 'application/json'}, request: request);
     });
-    final client = SupabaseClient(
-      'https://example.test',
-      'test-publishable-key',
-      httpClient: mock,
-      accessToken: () async => 'test-session-token',
-    );
+    final client = SupabaseClient('https://example.test', 'test-publishable-key', httpClient: mock, accessToken: () async => 'test-session-token');
     addTearDown(() async {
       await client.dispose();
       mock.close();
@@ -385,6 +375,19 @@ Future<OrderDraft> createPending(LocalDatabase store, {int minute = 0}) async {
     cart.options.setServiceType(ServiceType.dineIn);
     final draft = OrderDraft.fromCart(cart, now: DateTime.utc(2026, 11, 13, 1, minute));
     await store.savePendingOrder(draft);
+    await store.database.transaction((transaction) async {
+      final order = (await transaction.query('orders', where: 'id = ?', whereArgs: [draft.id])).single;
+      final pendingOrder = {...order, 'provisional_serial': order['serial'], 'serial_status': 'PROVISIONAL', 'sync_status': 'PENDING_SYNC'};
+      await transaction.update('orders', pendingOrder, where: 'id = ?', whereArgs: [draft.id]);
+      final items = await transaction.query('order_items', where: 'order_id = ?', whereArgs: [draft.id]);
+      await transaction.insert('sync_outbox', {
+        'operation_id': draft.operationId,
+        'order_id': draft.id,
+        'operation': 'CREATE',
+        'payload': jsonEncode({'order': pendingOrder, 'items': items}),
+        'created_at': pendingOrder['created_at'],
+      });
+    });
     return draft;
   } finally {
     cart.dispose();

@@ -54,18 +54,20 @@ class LocalDatabase {
     final database = await selectedFactory.openDatabase(
       filePath,
       options: OpenDatabaseOptions(
-        version: 4,
+        version: 5,
         onConfigure: (database) => database.execute('PRAGMA foreign_keys = ON'),
         onCreate: (database, version) async {
           await _createSchema(database, version);
           await _migrateToVersion2(database);
           await _migrateToVersion3(database);
           await _migrateToVersion4(database);
+          await _migrateToVersion5(database);
         },
         onUpgrade: (database, oldVersion, newVersion) async {
           if (oldVersion < 2) await _migrateToVersion2(database);
           if (oldVersion < 3) await _migrateToVersion3(database);
           if (oldVersion < 4) await _migrateToVersion4(database);
+          if (oldVersion < 5) await _migrateToVersion5(database);
         },
       ),
     );
@@ -85,12 +87,7 @@ class LocalDatabase {
       if (!RegExp(r'(Z|[+-]\d{2}:\d{2})$', caseSensitive: false).hasMatch(rawDate)) continue;
       final instant = DateTime.tryParse(rawDate);
       if (instant == null) continue;
-      await database.update(
-        'orders',
-        {'business_date': businessDate(instant)},
-        where: 'id = ?',
-        whereArgs: [order['id']],
-      );
+      await database.update('orders', {'business_date': businessDate(instant)}, where: 'id = ?', whereArgs: [order['id']]);
     }
     await database.execute('CREATE INDEX orders_business_date_serial_idx ON orders(business_date, serial)');
   }
@@ -103,6 +100,22 @@ class LocalDatabase {
   static Future<void> _migrateToVersion4(Database database) async {
     await database.execute('ALTER TABLE orders ADD COLUMN provisional_serial INTEGER');
     await database.execute("UPDATE orders SET provisional_serial = serial WHERE serial_status = 'PROVISIONAL'");
+  }
+
+  static Future<void> _migrateToVersion5(Database database) async {
+    await database.execute('''
+      CREATE TABLE daily_serial_counters (
+        business_date TEXT PRIMARY KEY,
+        last_serial INTEGER NOT NULL CHECK (last_serial >= 9)
+      )
+    ''');
+    await database.execute('''
+      INSERT OR IGNORE INTO daily_serial_counters (business_date, last_serial)
+      SELECT business_date, MAX(9, MAX(serial))
+      FROM orders
+      WHERE business_date IS NOT NULL
+      GROUP BY business_date
+    ''');
   }
 
   static Future<void> _createSchema(Database database, int version) async {
@@ -216,92 +229,70 @@ class LocalDatabase {
     });
   }
 
-  Future<bool> hasVisibleMenuSnapshot() async =>
-      (await database.query('sync_metadata', where: 'collection = ?', whereArgs: ['visible_menu'])).isNotEmpty;
+  Future<bool> hasVisibleMenuSnapshot() async => (await database.query('sync_metadata', where: 'collection = ?', whereArgs: ['visible_menu'])).isNotEmpty;
 
-  Future<List<Map<String, Object?>>> localOrders() =>
-      database.query('orders', orderBy: 'datetime(order_date) DESC, rowid DESC');
+  Future<List<Map<String, Object?>>> localOrders() => database.query('orders', orderBy: 'datetime(order_date) DESC, rowid DESC');
 
   Future<Map<String, Object?>?> localOrder(String orderId) async {
     final orders = await database.query('orders', where: 'id = ?', whereArgs: [orderId], limit: 1);
     return orders.isEmpty ? null : orders.single;
   }
 
-  Future<List<Map<String, Object?>>> localOrderItems(String orderId) =>
-      database.query('order_items', where: 'order_id = ?', whereArgs: [orderId], orderBy: 'rowid ASC');
+  Future<List<Map<String, Object?>>> localOrderItems(String orderId) => database.query('order_items', where: 'order_id = ?', whereArgs: [orderId], orderBy: 'rowid ASC');
 
   Future<List<Map<String, Object?>>> pendingOrderOperations() => database.query(
     'sync_outbox',
-    where: 'operation = ?',
-    whereArgs: ['CREATE'],
+    where:
+        'operation = ? AND order_id IN '
+        '(SELECT id FROM orders WHERE serial_status = ? AND sync_status IN (?, ?))',
+    whereArgs: ['CREATE', 'PROVISIONAL', 'PENDING_SYNC', 'SYNC_FAILED'],
     orderBy: 'created_at ASC, rowid ASC',
   );
 
-  Future<void> recordOrderSyncFailure(String operationId, String errorCode) =>
-      database.transaction((transaction) async {
-        final operations = await transaction.query('sync_outbox', where: 'operation_id = ?', whereArgs: [operationId]);
-        if (operations.length != 1) throw StateError('Pending operation not found');
-        final operation = operations.single;
-        await transaction.update(
-          'sync_outbox',
-          {'retry_count': (operation['retry_count'] as int) + 1, 'last_error': errorCode},
-          where: 'operation_id = ?',
-          whereArgs: [operationId],
-        );
-        final changed = await transaction.update(
-          'orders',
-          {'sync_status': 'SYNC_FAILED'},
-          where: 'id = ? AND sync_status IN (?, ?)',
-          whereArgs: [operation['order_id'], 'PENDING_SYNC', 'SYNC_FAILED'],
-        );
-        if (changed != 1) throw StateError('Pending order not found');
-      });
-
-  Future<void> completeOrderSync({
-    required String operationId,
-    required String orderId,
-    required int serial,
-    required String businessDate,
-  }) => database.transaction((transaction) async {
-    if (serial < 10) throw StateError('Invalid official serial');
+  Future<void> recordOrderSyncFailure(String operationId, String errorCode) => database.transaction((transaction) async {
     final operations = await transaction.query('sync_outbox', where: 'operation_id = ?', whereArgs: [operationId]);
-    if (operations.length != 1 ||
-        operations.single['order_id'] != orderId ||
-        operations.single['operation'] != 'CREATE') {
-      throw StateError('Pending operation mismatch');
-    }
-    final updated = await transaction.update(
+    if (operations.length != 1) throw StateError('Pending operation not found');
+    final operation = operations.single;
+    await transaction.update('sync_outbox', {'retry_count': (operation['retry_count'] as int) + 1, 'last_error': errorCode}, where: 'operation_id = ?', whereArgs: [operationId]);
+    final changed = await transaction.update(
       'orders',
-      {'serial': serial, 'serial_status': 'ASSIGNED', 'sync_status': 'SYNCED'},
-      where: 'id = ? AND business_date = ? AND serial_status = ? AND sync_status IN (?, ?)',
-      whereArgs: [orderId, businessDate, 'PROVISIONAL', 'PENDING_SYNC', 'SYNC_FAILED'],
+      {'sync_status': 'SYNC_FAILED'},
+      where: 'id = ? AND sync_status IN (?, ?)',
+      whereArgs: [operation['order_id'], 'PENDING_SYNC', 'SYNC_FAILED'],
     );
-    if (updated != 1) throw StateError('Pending order or business date mismatch');
-    final deleted = await transaction.delete('sync_outbox', where: 'operation_id = ?', whereArgs: [operationId]);
-    if (deleted != 1) throw StateError('Pending operation could not be removed');
+    if (changed != 1) throw StateError('Pending order not found');
   });
 
+  Future<void> completeOrderSync({required String operationId, required String orderId, required int serial, required String businessDate}) =>
+      database.transaction((transaction) async {
+        if (serial < 10) throw StateError('Invalid official serial');
+        final operations = await transaction.query('sync_outbox', where: 'operation_id = ?', whereArgs: [operationId]);
+        if (operations.length != 1 || operations.single['order_id'] != orderId || operations.single['operation'] != 'CREATE') {
+          throw StateError('Pending operation mismatch');
+        }
+        final updated = await transaction.update(
+          'orders',
+          {'serial': serial, 'serial_status': 'ASSIGNED', 'sync_status': 'SYNCED'},
+          where: 'id = ? AND business_date = ? AND serial_status = ? AND sync_status IN (?, ?)',
+          whereArgs: [orderId, businessDate, 'PROVISIONAL', 'PENDING_SYNC', 'SYNC_FAILED'],
+        );
+        if (updated != 1) throw StateError('Pending order or business date mismatch');
+        final deleted = await transaction.delete('sync_outbox', where: 'operation_id = ?', whereArgs: [operationId]);
+        if (deleted != 1) throw StateError('Pending operation could not be removed');
+      });
+
   Future<SavedOrder> savePendingOrder(OrderDraft draft) => database.transaction((transaction) async {
-    final existing = await transaction.query('sync_outbox', where: 'operation_id = ?', whereArgs: [draft.operationId]);
+    final existing = await transaction.query('orders', where: 'id = ?', whereArgs: [draft.id]);
     if (existing.isNotEmpty) {
-      if (existing.single['order_id'] != draft.id) throw StateError('Operation belongs to another order');
-      final orders = await transaction.query('orders', where: 'id = ?', whereArgs: [draft.id]);
-      if (orders.length != 1) throw StateError('Outbox order is missing');
-      final order = orders.single;
+      final order = existing.single;
       return SavedOrder(id: draft.id, serial: order['serial'] as int, businessDate: order['business_date'] as String);
     }
 
-    final unknownDates = Sqflite.firstIntValue(
-      await transaction.rawQuery('SELECT COUNT(*) FROM orders WHERE business_date IS NULL'),
-    );
+    final unknownDates = Sqflite.firstIntValue(await transaction.rawQuery('SELECT COUNT(*) FROM orders WHERE business_date IS NULL'));
     if (unknownDates != 0) throw UnknownOrderDateException();
 
     for (final item in draft.items) {
-      final menuItems = await transaction.query(
-        'menu_items',
-        where: item.menuLegacyId == null ? 'id = ?' : 'legacy_id = ?',
-        whereArgs: [item.menuLegacyId ?? item.menuId],
-      );
+      final menuItems = await transaction.query('menu_items', where: item.menuLegacyId == null ? 'id = ?' : 'legacy_id = ?', whereArgs: [item.menuLegacyId ?? item.menuId]);
       if (menuItems.length != 1) throw OrderMenuChangedException();
       final current = menuItems.single;
       if (current['is_available'] != 1 ||
@@ -315,19 +306,18 @@ class LocalDatabase {
     }
 
     final day = businessDate(draft.orderDate);
-    final maximum = Sqflite.firstIntValue(
-      await transaction.rawQuery('SELECT MAX(serial) FROM orders WHERE business_date = ?', [day]),
-    );
-    if (maximum == 0x7fffffffffffffff) throw StateError('Serial number limit reached');
-    final serial = maximum == null || maximum < 10 ? 10 : maximum + 1;
+    final counters = await transaction.query('daily_serial_counters', where: 'business_date = ?', whereArgs: [day]);
+    final lastSerial = counters.isEmpty ? 9 : counters.single['last_serial'] as int;
+    if (lastSerial == 0x7fffffffffffffff) throw StateError('Serial number limit reached');
+    final serial = (lastSerial < 9 ? 9 : lastSerial) + 1;
+    await transaction.insert('daily_serial_counters', {'business_date': day, 'last_serial': serial}, conflictAlgorithm: ConflictAlgorithm.replace);
     final timestamp = draft.orderDate.toIso8601String();
     final order = <String, Object?>{
       'id': draft.id,
       'takeout': draft.serviceType == ServiceType.takeout ? 1 : 0,
       'uber': draft.serviceType == ServiceType.uber ? 1 : 0,
       'serial': serial,
-      'provisional_serial': serial,
-      'serial_status': 'PROVISIONAL',
+      'serial_status': 'ASSIGNED',
       'business_date': day,
       'total_price': draft.total,
       'get_pay': draft.receivedAmount,
@@ -339,7 +329,7 @@ class LocalDatabase {
       'mark': draft.mark,
       'created_at': timestamp,
       'updated_at': timestamp,
-      'sync_status': 'PENDING_SYNC',
+      'sync_status': 'LOCAL_ONLY',
     };
     final items = draft.items
         .map(
@@ -361,21 +351,10 @@ class LocalDatabase {
     for (final item in items) {
       await transaction.insert('order_items', item);
     }
-    await transaction.insert('sync_outbox', {
-      'operation_id': draft.operationId,
-      'order_id': draft.id,
-      'operation': 'CREATE',
-      'payload': jsonEncode({'order': order, 'items': items}),
-      'created_at': timestamp,
-    });
     return SavedOrder(id: draft.id, serial: serial, businessDate: day);
   });
 
-  Future<void> createOrder({
-    required Map<String, Object?> order,
-    required List<Map<String, Object?>> items,
-    required String operationId,
-  }) async {
+  Future<void> createOrder({required Map<String, Object?> order, required List<Map<String, Object?>> items, required String operationId}) async {
     final orderId = order['id'] as String;
     final createdAt = order['created_at'] as String;
     final pendingOrder = {...order, 'sync_status': 'PENDING_SYNC'};

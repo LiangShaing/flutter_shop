@@ -10,7 +10,6 @@ import 'local_orders_page.dart';
 import 'menu_controller.dart';
 import 'order_draft.dart';
 import 'order_options.dart';
-import 'order_sync_controller.dart';
 
 class MenuPage extends StatefulWidget {
   const MenuPage({super.key, required this.client});
@@ -24,8 +23,6 @@ class MenuPage extends StatefulWidget {
 class _MenuPageState extends State<MenuPage> with WidgetsBindingObserver {
   final CartController _cart = CartController();
   MenuController? _controller;
-  OrderSyncController? _orderSync;
-  StreamSubscription<AuthState>? _authSubscription;
   RealtimeChannel? _channel;
   Timer? _timer;
   late Future<void> _startup;
@@ -49,33 +46,11 @@ class _MenuPageState extends State<MenuPage> with WidgetsBindingObserver {
         return;
       }
       final client = widget.client;
-      final controller = MenuController(
-        store: store,
-        fetchVisibleMenu: client == null ? null : () => fetchVisibleMenu(client),
-      );
+      final controller = MenuController(store: store, fetchVisibleMenu: client == null ? null : () => fetchVisibleMenu(client));
       _controller = controller;
       if (client != null) {
-        final orderSync = OrderSyncController(
-          store: store,
-          hasSession: () => client.auth.currentSession != null,
-          submitOrder: (operationId, payload) => submitMerchantOrder(client, operationId, payload),
-        );
-        _orderSync = orderSync;
-        _authSubscription = client.auth.onAuthStateChange.listen(
-          (state) => unawaited(
-            orderSync.sync(
-              authorizationChanged:
-                  state.event == AuthChangeEvent.signedIn ||
-                  state.event == AuthChangeEvent.tokenRefreshed ||
-                  (state.event == AuthChangeEvent.initialSession && state.session != null),
-            ),
-          ),
-          onError: (Object error, StackTrace stackTrace) => unawaited(orderSync.sync()),
-        );
-        unawaited(orderSync.sync());
         _timer = Timer.periodic(const Duration(minutes: 1), (_) {
           unawaited(controller.refresh(reason: 'periodic'));
-          unawaited(orderSync.sync());
         });
       }
       setState(() {});
@@ -121,7 +96,6 @@ class _MenuPageState extends State<MenuPage> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       unawaited(_controller?.refresh(reason: 'resume'));
-      unawaited(_orderSync?.sync());
     }
   }
 
@@ -129,7 +103,6 @@ class _MenuPageState extends State<MenuPage> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
-    unawaited(_authSubscription?.cancel());
     final channel = _channel;
     if (channel != null) unawaited(widget.client!.removeChannel(channel));
     unawaited(_closeResources());
@@ -139,7 +112,6 @@ class _MenuPageState extends State<MenuPage> with WidgetsBindingObserver {
 
   Future<void> _closeResources() async {
     await _startup;
-    await _orderSync?.close();
     await _controller?.close();
   }
 
@@ -157,11 +129,7 @@ class _MenuPageState extends State<MenuPage> with WidgetsBindingObserver {
             width: MediaQuery.sizeOf(context).width < 400 ? 72 : 180,
             height: kToolbarHeight,
             child: controller == null
-                ? MenuSyncStatus(
-                    state: MenuSyncState.loading,
-                    items: const [],
-                    realtimeConfigured: widget.client != null,
-                  )
+                ? MenuSyncStatus(state: MenuSyncState.loading, items: const [], realtimeConfigured: widget.client != null)
                 : ListenableBuilder(
                     listenable: controller,
                     builder: (context, _) => MenuSyncStatus(
@@ -173,30 +141,21 @@ class _MenuPageState extends State<MenuPage> with WidgetsBindingObserver {
                     ),
                   ),
           ),
-          MenuCartAction(
-            cart: _cart,
-            menuUpdates: controller,
-            currentMenu: () => controller?.items ?? const [],
-            saveOrder: controller?.store.savePendingOrder,
-            onSaved: () => unawaited(_orderSync?.sync()),
-          ),
+          MenuCartAction(cart: _cart, menuUpdates: controller, currentMenu: () => controller?.items ?? const [], saveOrder: controller?.store.savePendingOrder),
           IconButton(
             tooltip: '訂單',
             onPressed: controller == null
                 ? null
                 : () => Navigator.of(context).push(
                     MaterialPageRoute<void>(
-                      builder: (_) =>
-                          LocalOrdersPage(store: controller.store, client: widget.client, orderSync: _orderSync),
+                      builder: (_) => LocalOrdersPage(store: controller.store, client: widget.client),
                     ),
                   ),
             icon: const Icon(Icons.receipt_long_outlined),
           ),
           IconButton(
             tooltip: '重新整理菜單',
-            onPressed: widget.client == null || controller == null
-                ? null
-                : () => unawaited(controller.refresh(reason: 'manual')),
+            onPressed: widget.client == null || controller == null ? null : () => unawaited(controller.refresh(reason: 'manual')),
             icon: const Icon(Icons.refresh),
           ),
         ],
@@ -214,14 +173,7 @@ class _MenuPageState extends State<MenuPage> with WidgetsBindingObserver {
 }
 
 class MenuSyncStatus extends StatelessWidget {
-  const MenuSyncStatus({
-    super.key,
-    required this.state,
-    required this.items,
-    required this.realtimeConfigured,
-    this.realtimeStatus,
-    this.lastRealtimeEvent,
-  });
+  const MenuSyncStatus({super.key, required this.state, required this.items, required this.realtimeConfigured, this.realtimeStatus, this.lastRealtimeEvent});
 
   final MenuSyncState state;
   final List<Map<String, Object?>> items;
@@ -236,8 +188,7 @@ class MenuSyncStatus extends StatelessWidget {
       MenuSyncState.offline => items.any((item) => item['source'] == 'BUNDLED_OFFLINE') ? '本機預設菜單' : '本機快取',
       MenuSyncState.syncing => '同步中',
       MenuSyncState.synced => '雲端可見菜單已更新',
-      MenuSyncState.failed =>
-        items.any((item) => item['source'] == 'BUNDLED_OFFLINE') ? '同步失敗，顯示本機預設菜單' : '同步失敗，顯示本機快取',
+      MenuSyncState.failed => items.any((item) => item['source'] == 'BUNDLED_OFFLINE') ? '同步失敗，顯示本機預設菜單' : '同步失敗，顯示本機快取',
     };
     final realtimeLabel = !realtimeConfigured
         ? '即時連線未設定'
@@ -246,9 +197,7 @@ class MenuSyncStatus extends StatelessWidget {
         : realtimeStatus == null
         ? '即時連線中'
         : '即時連線中斷，使用定期更新';
-    final eventLabel = lastRealtimeEvent == null
-        ? null
-        : '最近即時事件 ${TimeOfDay.fromDateTime(lastRealtimeEvent!).format(context)}';
+    final eventLabel = lastRealtimeEvent == null ? null : '最近即時事件 ${TimeOfDay.fromDateTime(lastRealtimeEvent!).format(context)}';
     return Tooltip(
       message: [status, realtimeLabel, ?eventLabel].join('\n'),
       child: FittedBox(
@@ -269,20 +218,12 @@ class MenuSyncStatus extends StatelessWidget {
 }
 
 class MenuCartAction extends StatelessWidget {
-  const MenuCartAction({
-    super.key,
-    required this.cart,
-    required this.currentMenu,
-    this.menuUpdates,
-    this.saveOrder,
-    this.onSaved,
-  });
+  const MenuCartAction({super.key, required this.cart, required this.currentMenu, this.menuUpdates, this.saveOrder});
 
   final CartController cart;
   final List<Map<String, Object?>> Function() currentMenu;
   final Listenable? menuUpdates;
   final Future<SavedOrder> Function(OrderDraft)? saveOrder;
-  final VoidCallback? onSaved;
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
@@ -296,9 +237,7 @@ class MenuCartAction extends StatelessWidget {
           button: true,
           enabled: cart.quantity > 0,
           child: InkWell(
-            onTap: cart.quantity == 0
-                ? null
-                : () => _showSelectedItems(context, cart, currentMenu, menuUpdates, saveOrder, onSaved),
+            onTap: cart.quantity == 0 ? null : () => _showSelectedItems(context, cart, currentMenu, menuUpdates, saveOrder),
             child: SizedBox(
               width: 60,
               height: kToolbarHeight,
@@ -334,7 +273,6 @@ void _showSelectedItems(
   List<Map<String, Object?>> Function() currentMenu,
   Listenable? menuUpdates,
   Future<SavedOrder> Function(OrderDraft)? saveOrder,
-  VoidCallback? onSaved,
 ) {
   showModalBottomSheet<void>(
     context: context,
@@ -342,33 +280,18 @@ void _showSelectedItems(
     isScrollControlled: true,
     isDismissible: false,
     enableDrag: false,
-    builder: (_) => _SelectedItemsSheet(
-      parentContext: context,
-      cart: cart,
-      currentMenu: currentMenu,
-      menuUpdates: menuUpdates,
-      saveOrder: saveOrder,
-      onSaved: onSaved,
-    ),
+    builder: (_) => _SelectedItemsSheet(parentContext: context, cart: cart, currentMenu: currentMenu, menuUpdates: menuUpdates, saveOrder: saveOrder),
   );
 }
 
 class _SelectedItemsSheet extends StatefulWidget {
-  const _SelectedItemsSheet({
-    required this.parentContext,
-    required this.cart,
-    required this.currentMenu,
-    this.menuUpdates,
-    this.saveOrder,
-    this.onSaved,
-  });
+  const _SelectedItemsSheet({required this.parentContext, required this.cart, required this.currentMenu, this.menuUpdates, this.saveOrder});
 
   final BuildContext parentContext;
   final CartController cart;
   final List<Map<String, Object?>> Function() currentMenu;
   final Listenable? menuUpdates;
   final Future<SavedOrder> Function(OrderDraft)? saveOrder;
-  final VoidCallback? onSaved;
 
   @override
   State<_SelectedItemsSheet> createState() => _SelectedItemsSheetState();
@@ -430,15 +353,14 @@ class _SelectedItemsSheetState extends State<_SelectedItemsSheet> {
         context: widget.parentContext,
         builder: (context) => AlertDialog(
           title: const Text('已存入本機'),
-          content: Text('暫定流水號 ${saved.serial}\n${saved.businessDate}\n同步狀態請至本機訂單查看；尚未列印。'),
+          content: Text('正式流水號 ${saved.serial}\n${saved.businessDate}\n第一階段只存於本機，不會上傳；尚未列印。'),
           actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('確定'))],
         ),
       );
-      widget.onSaved?.call();
     } on OrderMenuChangedException {
       if (mounted) setState(() => _saveError = '菜單已變更，請檢查已選品項');
     } on UnknownOrderDateException {
-      if (mounted) setState(() => _saveError = '本機舊訂單日期缺少時區，無法產生暫定流水號');
+      if (mounted) setState(() => _saveError = '本機舊訂單日期缺少時區，無法產生正式流水號');
     } catch (error) {
       logMenuSync('local order save failed type=${error.runtimeType}');
       if (mounted) setState(() => _saveError = '存單失敗，已保留選餐，請重試');
@@ -470,11 +392,7 @@ class _SelectedItemsSheetState extends State<_SelectedItemsSheet> {
                         children: [
                           Expanded(child: Text('已選品項', style: Theme.of(context).textTheme.titleLarge)),
                           Text('NT\$ ${cart.total}', style: Theme.of(context).textTheme.titleMedium),
-                          IconButton(
-                            tooltip: '關閉已選品項',
-                            onPressed: () => Navigator.of(context).pop(),
-                            icon: const Icon(Icons.close),
-                          ),
+                          IconButton(tooltip: '關閉已選品項', onPressed: () => Navigator.of(context).pop(), icon: const Icon(Icons.close)),
                         ],
                       ),
                     ),
@@ -488,8 +406,7 @@ class _SelectedItemsSheetState extends State<_SelectedItemsSheet> {
                         ],
                         selected: {if (cart.options.serviceType != null) cart.options.serviceType!},
                         emptySelectionAllowed: true,
-                        onSelectionChanged: (selection) =>
-                            cart.options.setServiceType(selection.isEmpty ? null : selection.single),
+                        onSelectionChanged: (selection) => cart.options.setServiceType(selection.isEmpty ? null : selection.single),
                       ),
                     ),
                     Padding(
@@ -510,9 +427,7 @@ class _SelectedItemsSheetState extends State<_SelectedItemsSheet> {
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
                       child: Text(
-                        cart.options.changeFor(cart.total) == null
-                            ? '找零：--'
-                            : '找零：NT\$ ${cart.options.changeFor(cart.total)}',
+                        cart.options.changeFor(cart.total) == null ? '找零：--' : '找零：NT\$ ${cart.options.changeFor(cart.total)}',
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
                     ),
@@ -543,22 +458,10 @@ class _SelectedItemsSheetState extends State<_SelectedItemsSheet> {
                           trailing: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              IconButton(
-                                tooltip: '減少 $name',
-                                onPressed: () => cart.removeOne(entry.key),
-                                icon: const Icon(Icons.remove_circle_outline),
-                              ),
+                              IconButton(tooltip: '減少 $name', onPressed: () => cart.removeOne(entry.key), icon: const Icon(Icons.remove_circle_outline)),
                               SizedBox(width: 28, child: Text('${selected.quantity}', textAlign: TextAlign.center)),
-                              IconButton(
-                                tooltip: '增加 $name',
-                                onPressed: conflict ? null : () => cart.add(item),
-                                icon: const Icon(Icons.add_circle_outline),
-                              ),
-                              IconButton(
-                                tooltip: '移除 $name',
-                                onPressed: () => cart.removeItem(entry.key),
-                                icon: const Icon(Icons.delete_outline),
-                              ),
+                              IconButton(tooltip: '增加 $name', onPressed: conflict ? null : () => cart.add(item), icon: const Icon(Icons.add_circle_outline)),
+                              IconButton(tooltip: '移除 $name', onPressed: () => cart.removeItem(entry.key), icon: const Icon(Icons.delete_outline)),
                             ],
                           ),
                         );
@@ -573,9 +476,7 @@ class _SelectedItemsSheetState extends State<_SelectedItemsSheet> {
                         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                         child: FilledButton.icon(
                           onPressed: _saving ? null : _save,
-                          icon: _saving
-                              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                              : const Icon(Icons.save_outlined),
+                          icon: _saving ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.save_outlined),
                           label: Text(_saving ? '儲存中' : '存入本機'),
                         ),
                       ),
@@ -728,13 +629,7 @@ class _IngredientOptions extends StatelessWidget {
 }
 
 class _MenuTableRow extends StatelessWidget {
-  const _MenuTableRow({
-    super.key,
-    required this.item,
-    required this.quantity,
-    required this.conflict,
-    required this.onQuantityChanged,
-  });
+  const _MenuTableRow({super.key, required this.item, required this.quantity, required this.conflict, required this.onQuantityChanged});
 
   final Map<String, Object?> item;
   final int quantity;
@@ -803,13 +698,7 @@ class _MenuTableRow extends StatelessWidget {
           ),
           Expanded(
             flex: 3,
-            child: _QuantityField(
-              itemKey: cartItemKey(item),
-              name: name,
-              quantity: quantity,
-              enabled: available && !conflict,
-              onChanged: onQuantityChanged,
-            ),
+            child: _QuantityField(itemKey: cartItemKey(item), name: name, quantity: quantity, enabled: available && !conflict, onChanged: onQuantityChanged),
           ),
         ],
       ),
@@ -818,13 +707,7 @@ class _MenuTableRow extends StatelessWidget {
 }
 
 class _QuantityField extends StatefulWidget {
-  const _QuantityField({
-    required this.itemKey,
-    required this.name,
-    required this.quantity,
-    required this.enabled,
-    required this.onChanged,
-  });
+  const _QuantityField({required this.itemKey, required this.name, required this.quantity, required this.enabled, required this.onChanged});
 
   final String itemKey;
   final String name;

@@ -53,14 +53,7 @@ void main() {
           body: MenuView(
             state: MenuSyncState.failed,
             items: const [
-              {
-                'menu_row': '2',
-                'name': '米粉',
-                'sub_name': '湯',
-                'price': 50,
-                'is_available': 1,
-                'source': 'BUNDLED_OFFLINE',
-              },
+              {'menu_row': '2', 'name': '米粉', 'sub_name': '湯', 'price': 50, 'is_available': 1, 'source': 'BUNDLED_OFFLINE'},
             ],
           ),
         ),
@@ -82,12 +75,7 @@ void main() {
               const SizedBox(
                 width: 180,
                 height: kToolbarHeight,
-                child: MenuSyncStatus(
-                  state: MenuSyncState.synced,
-                  items: [],
-                  realtimeConfigured: true,
-                  realtimeStatus: RealtimeSubscribeStatus.channelError,
-                ),
+                child: MenuSyncStatus(state: MenuSyncState.synced, items: [], realtimeConfigured: true, realtimeStatus: RealtimeSubscribeStatus.channelError),
               ),
             ],
           ),
@@ -223,9 +211,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         builder: (context, child) => MediaQuery(
-          data: MediaQuery.of(
-            context,
-          ).copyWith(textScaler: const TextScaler.linear(2), padding: const EdgeInsets.only(bottom: 24)),
+          data: MediaQuery.of(context).copyWith(textScaler: const TextScaler.linear(2), padding: const EdgeInsets.only(bottom: 24)),
           child: child!,
         ),
         home: Scaffold(
@@ -253,15 +239,8 @@ void main() {
     expect(statusRect.right, lessThanOrEqualTo(cartRect.left));
     expect(cartRect.right, lessThanOrEqualTo(tester.getRect(find.byIcon(Icons.receipt_long)).left));
     expect(tester.getRect(find.byType(MenuView)).bottom, 640);
-    final scrollViews = tester.widgetList<SingleChildScrollView>(
-      find.descendant(of: find.byType(MenuView), matching: find.byType(SingleChildScrollView)),
-    );
-    expect(
-      scrollViews.any(
-        (view) => view.scrollDirection == Axis.vertical && view.padding == const EdgeInsets.only(bottom: 24),
-      ),
-      isTrue,
-    );
+    final scrollViews = tester.widgetList<SingleChildScrollView>(find.descendant(of: find.byType(MenuView), matching: find.byType(SingleChildScrollView)));
+    expect(scrollViews.any((view) => view.scrollDirection == Axis.vertical && view.padding == const EdgeInsets.only(bottom: 24)), isTrue);
     expect(tester.takeException(), isNull);
   });
 
@@ -291,10 +270,7 @@ void main() {
     expect(second.dy, third.dy);
     expect(first.dx, lessThan(second.dx));
     expect(second.dx, lessThan(third.dx));
-    expect(
-      find.byWidgetPredicate((widget) => widget is Container && widget.color == Colors.amberAccent),
-      findsOneWidget,
-    );
+    expect(find.byWidgetPredicate((widget) => widget is Container && widget.color == Colors.amberAccent), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -383,6 +359,20 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('少湯'), findsOneWidget);
     expect(cart.options.serviceType, ServiceType.uber);
+  });
+
+  testWidgets('shows first-phase orders as official and local-only', (tester) async {
+    final order = {...localOrder(), 'serial_status': 'ASSIGNED', 'sync_status': 'LOCAL_ONLY'};
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: LocalOrdersView(orders: Future.value([order]), onOpen: (_) {}),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('正式流水號 10'), findsOneWidget);
+    expect(find.text('2026-11-13 10:00:00 · 本機存單，第一階段不上傳'), findsOneWidget);
   });
 
   testWidgets('order options remain usable with a keyboard and enlarged text', (tester) async {
@@ -499,12 +489,11 @@ void main() {
     expect(cart.options.receivedAmount, 0);
   });
 
-  testWidgets('saves a pending local order and resets the cart only after success', (tester) async {
+  testWidgets('saves a local-only official order and resets the cart only after success', (tester) async {
     final item = menuItem(id: 'menu-1', name: '米粉', subName: '湯', price: 50);
     final cart = CartController();
     addTearDown(cart.dispose);
     final drafts = <OrderDraft>[];
-    var syncRequests = 0;
     Future<SavedOrder> save(OrderDraft draft) async {
       drafts.add(draft);
       return SavedOrder(id: draft.id, serial: 10, businessDate: '2026-11-13');
@@ -514,7 +503,7 @@ void main() {
     cart.options.setServiceType(ServiceType.uber);
     cart.options.setSpiceLevel(2);
     cart.options.setPaymentInput('100');
-    await tester.pumpWidget(cartScreen(cart: cart, items: [item], saveOrder: save, onSaved: () => syncRequests++));
+    await tester.pumpWidget(cartScreen(cart: cart, items: [item], saveOrder: save));
     await tester.tap(find.byTooltip('查看已選'));
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.widgetWithText(FilledButton, '存入本機'));
@@ -522,17 +511,15 @@ void main() {
     await tester.tap(find.text('存入本機'));
     await tester.pumpAndSettle();
     expect(find.text('已存入本機'), findsOneWidget);
-    expect(find.textContaining('暫定流水號 10'), findsOneWidget);
-    expect(find.textContaining('同步狀態請至本機訂單查看；尚未列印'), findsOneWidget);
+    expect(find.textContaining('正式流水號 10'), findsOneWidget);
+    expect(find.textContaining('第一階段只存於本機，不會上傳；尚未列印。'), findsOneWidget);
     expect(cart.items, isEmpty);
     expect(cart.options.serviceType, isNull);
     expect(drafts.single.serviceType, ServiceType.uber);
     expect(drafts.single.spiceLevel, 2);
     expect(drafts.single.total, 100);
-    expect(syncRequests, 0);
     await tester.tap(find.text('確定'));
     await tester.pumpAndSettle();
-    expect(syncRequests, 1);
   });
 
   testWidgets('keeps the cart and stable draft when local saving fails', (tester) async {
@@ -651,7 +638,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('暫定流水號 10'), findsOneWidget);
-    expect(find.text('2026-11-13 10:00:00 · 待同步'), findsOneWidget);
+    expect(find.text('2026-11-13 10:00:00 · 第二階段待同步'), findsOneWidget);
     await tester.tap(find.text('暫定流水號 10'));
     expect(opened, same(order));
     await tester.pumpWidget(
@@ -668,7 +655,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('暫定流水號 10'), findsOneWidget);
-    expect(find.text('2026-11-13 10:00:00 · 待同步'), findsOneWidget);
+    expect(find.text('2026-11-13 10:00:00 · 第二階段待同步'), findsOneWidget);
     expect(find.text('Uber · 總額 NT\$ 100 · 實收 NT\$ 80'), findsOneWidget);
     expect(find.text('酸菜：不加 · 薑絲：加 · 大辣'), findsOneWidget);
     expect(find.text('標註：少湯'), findsOneWidget);
@@ -690,13 +677,7 @@ void main() {
     expect(find.text('需要店家登入或授權 · 待同步 1 筆'), findsOneWidget);
     await tester.tap(find.text('暫定流水號 10'));
     await tester.pumpAndSettle();
-    store.order = {
-      ...store.order,
-      'serial': 13,
-      'provisional_serial': 10,
-      'serial_status': 'ASSIGNED',
-      'sync_status': 'SYNCED',
-    };
+    store.order = {...store.order, 'serial': 13, 'provisional_serial': 10, 'serial_status': 'ASSIGNED', 'sync_status': 'SYNCED'};
     sync.emit(OrderSyncState.idle, 0);
     await tester.pumpAndSettle();
     expect(find.text('正式流水號 13'), findsOneWidget);
@@ -750,10 +731,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: LocalOrderDetailsView(
-            order: {...localOrder(), 'serial_status': 'UNKNOWN', 'chili_level': null, 'chili': 1},
-            items: Future.value([]),
-          ),
+          body: LocalOrderDetailsView(order: {...localOrder(), 'serial_status': 'UNKNOWN', 'chili_level': null, 'chili': 1}, items: Future.value([])),
         ),
       ),
     );
@@ -889,16 +867,7 @@ void main() {
     );
 
     controller.add([
-      {
-        'id': 'order-1',
-        'serial': 12,
-        'takeout': false,
-        'order_source': 'POS_APP',
-        'uber': false,
-        'status': 'PENDING',
-        'total_price': 180,
-        'order_date': '2026-11-12T10:00:00Z',
-      },
+      {'id': 'order-1', 'serial': 12, 'takeout': false, 'order_source': 'POS_APP', 'uber': false, 'status': 'PENDING', 'total_price': 180, 'order_date': '2026-11-12T10:00:00Z'},
     ]);
     await tester.pump();
 
@@ -907,16 +876,7 @@ void main() {
     expect(find.text('NT\$ 180'), findsOneWidget);
 
     controller.add([
-      {
-        'id': 'order-1',
-        'serial': 12,
-        'takeout': false,
-        'order_source': 'POS_APP',
-        'uber': false,
-        'status': 'PREPARING',
-        'total_price': 180,
-        'order_date': '2026-11-12T10:00:00Z',
-      },
+      {'id': 'order-1', 'serial': 12, 'takeout': false, 'order_source': 'POS_APP', 'uber': false, 'status': 'PREPARING', 'total_price': 180, 'order_date': '2026-11-12T10:00:00Z'},
     ]);
     await tester.pump();
 
@@ -928,15 +888,10 @@ void main() {
   });
 }
 
-Widget cartScreen({
-  required CartController cart,
-  required List<Map<String, Object?>> items,
-  Future<SavedOrder> Function(OrderDraft)? saveOrder,
-  VoidCallback? onSaved,
-}) => MaterialApp(
+Widget cartScreen({required CartController cart, required List<Map<String, Object?>> items, Future<SavedOrder> Function(OrderDraft)? saveOrder}) => MaterialApp(
   home: Scaffold(
     appBar: AppBar(
-      actions: [MenuCartAction(cart: cart, currentMenu: () => items, saveOrder: saveOrder, onSaved: onSaved)],
+      actions: [MenuCartAction(cart: cart, currentMenu: () => items, saveOrder: saveOrder)],
     ),
     body: MenuView(state: MenuSyncState.synced, items: items, cart: cart),
   ),
