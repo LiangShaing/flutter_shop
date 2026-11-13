@@ -10,6 +10,7 @@ import 'local_orders_page.dart';
 import 'menu_controller.dart';
 import 'order_draft.dart';
 import 'order_options.dart';
+import 'order_sync_controller.dart';
 
 class MenuPage extends StatefulWidget {
   const MenuPage({super.key, required this.client});
@@ -23,6 +24,8 @@ class MenuPage extends StatefulWidget {
 class _MenuPageState extends State<MenuPage> with WidgetsBindingObserver {
   final CartController _cart = CartController();
   MenuController? _controller;
+  OrderSyncController? _orderSync;
+  StreamSubscription<AuthState>? _authSubscription;
   RealtimeChannel? _channel;
   Timer? _timer;
   late Future<void> _startup;
@@ -51,6 +54,30 @@ class _MenuPageState extends State<MenuPage> with WidgetsBindingObserver {
         fetchVisibleMenu: client == null ? null : () => fetchVisibleMenu(client),
       );
       _controller = controller;
+      if (client != null) {
+        final orderSync = OrderSyncController(
+          store: store,
+          hasSession: () => client.auth.currentSession != null,
+          submitOrder: (operationId, payload) => submitMerchantOrder(client, operationId, payload),
+        );
+        _orderSync = orderSync;
+        _authSubscription = client.auth.onAuthStateChange.listen(
+          (state) => unawaited(
+            orderSync.sync(
+              authorizationChanged:
+                  state.event == AuthChangeEvent.signedIn ||
+                  state.event == AuthChangeEvent.tokenRefreshed ||
+                  (state.event == AuthChangeEvent.initialSession && state.session != null),
+            ),
+          ),
+          onError: (Object error, StackTrace stackTrace) => unawaited(orderSync.sync()),
+        );
+        unawaited(orderSync.sync());
+        _timer = Timer.periodic(const Duration(minutes: 1), (_) {
+          unawaited(controller.refresh(reason: 'periodic'));
+          unawaited(orderSync.sync());
+        });
+      }
       setState(() {});
       await controller.initialize();
       if (!mounted || client == null) return;
@@ -78,7 +105,6 @@ class _MenuPageState extends State<MenuPage> with WidgetsBindingObserver {
             if (mounted) setState(() => _realtimeStatus = status);
             if (status == RealtimeSubscribeStatus.subscribed) unawaited(controller.refresh(reason: 'subscribed'));
           });
-      _timer = Timer.periodic(const Duration(minutes: 1), (_) => unawaited(controller.refresh(reason: 'periodic')));
     } catch (error) {
       logMenuSync('startup failed type=${error.runtimeType}');
       if (mounted) setState(() => _error = error);
@@ -93,18 +119,28 @@ class _MenuPageState extends State<MenuPage> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) unawaited(_controller?.refresh(reason: 'resume'));
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_controller?.refresh(reason: 'resume'));
+      unawaited(_orderSync?.sync());
+    }
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
+    unawaited(_authSubscription?.cancel());
     final channel = _channel;
     if (channel != null) unawaited(widget.client!.removeChannel(channel));
-    unawaited(_startup.whenComplete(() => _controller?.close()));
+    unawaited(_closeResources());
     _cart.dispose();
     super.dispose();
+  }
+
+  Future<void> _closeResources() async {
+    await _startup;
+    await _orderSync?.close();
+    await _controller?.close();
   }
 
   @override
@@ -142,6 +178,7 @@ class _MenuPageState extends State<MenuPage> with WidgetsBindingObserver {
             menuUpdates: controller,
             currentMenu: () => controller?.items ?? const [],
             saveOrder: controller?.store.savePendingOrder,
+            onSaved: () => unawaited(_orderSync?.sync()),
           ),
           IconButton(
             tooltip: '訂單',
@@ -149,7 +186,8 @@ class _MenuPageState extends State<MenuPage> with WidgetsBindingObserver {
                 ? null
                 : () => Navigator.of(context).push(
                     MaterialPageRoute<void>(
-                      builder: (_) => LocalOrdersPage(store: controller.store, client: widget.client),
+                      builder: (_) =>
+                          LocalOrdersPage(store: controller.store, client: widget.client, orderSync: _orderSync),
                     ),
                   ),
             icon: const Icon(Icons.receipt_long_outlined),
@@ -231,12 +269,20 @@ class MenuSyncStatus extends StatelessWidget {
 }
 
 class MenuCartAction extends StatelessWidget {
-  const MenuCartAction({super.key, required this.cart, required this.currentMenu, this.menuUpdates, this.saveOrder});
+  const MenuCartAction({
+    super.key,
+    required this.cart,
+    required this.currentMenu,
+    this.menuUpdates,
+    this.saveOrder,
+    this.onSaved,
+  });
 
   final CartController cart;
   final List<Map<String, Object?>> Function() currentMenu;
   final Listenable? menuUpdates;
   final Future<SavedOrder> Function(OrderDraft)? saveOrder;
+  final VoidCallback? onSaved;
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
@@ -252,7 +298,7 @@ class MenuCartAction extends StatelessWidget {
           child: InkWell(
             onTap: cart.quantity == 0
                 ? null
-                : () => _showSelectedItems(context, cart, currentMenu, menuUpdates, saveOrder),
+                : () => _showSelectedItems(context, cart, currentMenu, menuUpdates, saveOrder, onSaved),
             child: SizedBox(
               width: 60,
               height: kToolbarHeight,
@@ -288,6 +334,7 @@ void _showSelectedItems(
   List<Map<String, Object?>> Function() currentMenu,
   Listenable? menuUpdates,
   Future<SavedOrder> Function(OrderDraft)? saveOrder,
+  VoidCallback? onSaved,
 ) {
   showModalBottomSheet<void>(
     context: context,
@@ -301,6 +348,7 @@ void _showSelectedItems(
       currentMenu: currentMenu,
       menuUpdates: menuUpdates,
       saveOrder: saveOrder,
+      onSaved: onSaved,
     ),
   );
 }
@@ -312,6 +360,7 @@ class _SelectedItemsSheet extends StatefulWidget {
     required this.currentMenu,
     this.menuUpdates,
     this.saveOrder,
+    this.onSaved,
   });
 
   final BuildContext parentContext;
@@ -319,6 +368,7 @@ class _SelectedItemsSheet extends StatefulWidget {
   final List<Map<String, Object?>> Function() currentMenu;
   final Listenable? menuUpdates;
   final Future<SavedOrder> Function(OrderDraft)? saveOrder;
+  final VoidCallback? onSaved;
 
   @override
   State<_SelectedItemsSheet> createState() => _SelectedItemsSheetState();
@@ -380,10 +430,11 @@ class _SelectedItemsSheetState extends State<_SelectedItemsSheet> {
         context: widget.parentContext,
         builder: (context) => AlertDialog(
           title: const Text('已存入本機'),
-          content: Text('暫定流水號 ${saved.serial}\n${saved.businessDate}\n待同步，尚未上傳或列印。'),
+          content: Text('暫定流水號 ${saved.serial}\n${saved.businessDate}\n同步狀態請至本機訂單查看；尚未列印。'),
           actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('確定'))],
         ),
       );
+      widget.onSaved?.call();
     } on OrderMenuChangedException {
       if (mounted) setState(() => _saveError = '菜單已變更，請檢查已選品項');
     } on UnknownOrderDateException {

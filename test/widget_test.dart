@@ -19,6 +19,7 @@ import 'package:flutter_shop/menu_controller.dart';
 import 'package:flutter_shop/menu_page.dart';
 import 'package:flutter_shop/order_draft.dart';
 import 'package:flutter_shop/order_options.dart';
+import 'package:flutter_shop/order_sync_controller.dart';
 import 'package:flutter_shop/orders_page.dart';
 
 void main() {
@@ -503,6 +504,7 @@ void main() {
     final cart = CartController();
     addTearDown(cart.dispose);
     final drafts = <OrderDraft>[];
+    var syncRequests = 0;
     Future<SavedOrder> save(OrderDraft draft) async {
       drafts.add(draft);
       return SavedOrder(id: draft.id, serial: 10, businessDate: '2026-11-13');
@@ -512,7 +514,7 @@ void main() {
     cart.options.setServiceType(ServiceType.uber);
     cart.options.setSpiceLevel(2);
     cart.options.setPaymentInput('100');
-    await tester.pumpWidget(cartScreen(cart: cart, items: [item], saveOrder: save));
+    await tester.pumpWidget(cartScreen(cart: cart, items: [item], saveOrder: save, onSaved: () => syncRequests++));
     await tester.tap(find.byTooltip('查看已選'));
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.widgetWithText(FilledButton, '存入本機'));
@@ -521,12 +523,16 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('已存入本機'), findsOneWidget);
     expect(find.textContaining('暫定流水號 10'), findsOneWidget);
-    expect(find.textContaining('待同步，尚未上傳或列印'), findsOneWidget);
+    expect(find.textContaining('同步狀態請至本機訂單查看；尚未列印'), findsOneWidget);
     expect(cart.items, isEmpty);
     expect(cart.options.serviceType, isNull);
     expect(drafts.single.serviceType, ServiceType.uber);
     expect(drafts.single.spiceLevel, 2);
     expect(drafts.single.total, 100);
+    expect(syncRequests, 0);
+    await tester.tap(find.text('確定'));
+    await tester.pumpAndSettle();
+    expect(syncRequests, 1);
   });
 
   testWidgets('keeps the cart and stable draft when local saving fails', (tester) async {
@@ -668,6 +674,53 @@ void main() {
     expect(find.text('標註：少湯'), findsOneWidget);
     expect(find.text('米粉-湯'), findsOneWidget);
     expect(find.text('× 2  ·  NT\$ 50'), findsOneWidget);
+  });
+
+  testWidgets('updates the order list and open details when an official serial arrives', (tester) async {
+    final store = FakeLocalOrdersStore(localOrder());
+    final sync = TestOrderSync(store);
+    sync.state = OrderSyncState.authRequired;
+    sync.pendingCount = 1;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: LocalOrdersPage(store: store, orderSync: sync),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('需要店家登入或授權 · 待同步 1 筆'), findsOneWidget);
+    await tester.tap(find.text('暫定流水號 10'));
+    await tester.pumpAndSettle();
+    store.order = {
+      ...store.order,
+      'serial': 13,
+      'provisional_serial': 10,
+      'serial_status': 'ASSIGNED',
+      'sync_status': 'SYNCED',
+    };
+    sync.emit(OrderSyncState.idle, 0);
+    await tester.pumpAndSettle();
+    expect(find.text('正式流水號 13'), findsOneWidget);
+    expect(find.text('原暫定流水號 10'), findsOneWidget);
+    expect(find.text('2026-11-13 10:00:00 · 已同步'), findsOneWidget);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.text('正式流水號 13'), findsOneWidget);
+    expect(find.text('沒有待同步訂單'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await sync.close();
+  });
+
+  testWidgets('does not claim the outbox is empty before it has loaded', (tester) async {
+    final sync = TestOrderSync(FakeLocalOrdersStore(localOrder()));
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: OrderSyncStatus(sync: sync)),
+      ),
+    );
+    expect(find.text('載入本機同步佇列'), findsOneWidget);
+    expect(find.text('沒有待同步訂單'), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await sync.close();
   });
 
   testWidgets('shows empty and error states for local order queries', (tester) async {
@@ -879,14 +932,42 @@ Widget cartScreen({
   required CartController cart,
   required List<Map<String, Object?>> items,
   Future<SavedOrder> Function(OrderDraft)? saveOrder,
+  VoidCallback? onSaved,
 }) => MaterialApp(
   home: Scaffold(
     appBar: AppBar(
-      actions: [MenuCartAction(cart: cart, currentMenu: () => items, saveOrder: saveOrder)],
+      actions: [MenuCartAction(cart: cart, currentMenu: () => items, saveOrder: saveOrder, onSaved: onSaved)],
     ),
     body: MenuView(state: MenuSyncState.synced, items: items, cart: cart),
   ),
 );
+
+class FakeLocalOrdersStore extends Fake implements LocalDatabase {
+  FakeLocalOrdersStore(this.order);
+
+  Map<String, Object?> order;
+
+  @override
+  Future<List<Map<String, Object?>>> localOrders() async => [order];
+
+  @override
+  Future<Map<String, Object?>?> localOrder(String orderId) async => order['id'] == orderId ? order : null;
+
+  @override
+  Future<List<Map<String, Object?>>> localOrderItems(String orderId) async => [
+    {'name': '米粉', 'show_name': '湯', 'price': 50, 'quantity': 2},
+  ];
+}
+
+class TestOrderSync extends OrderSyncController {
+  TestOrderSync(LocalDatabase store) : super(store: store, hasSession: () => false, submitOrder: (_, _) async => {});
+
+  void emit(OrderSyncState value, int count) {
+    state = value;
+    pendingCount = count;
+    notifyListeners();
+  }
+}
 
 Map<String, Object?> localOrder() => {
   'id': 'order-1',

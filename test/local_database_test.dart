@@ -196,6 +196,9 @@ void main() {
         version: 2,
         onCreate: (database, version) async {
           await database.execute('CREATE TABLE order_items (id TEXT PRIMARY KEY, name TEXT NOT NULL)');
+          await database.execute(
+            'CREATE TABLE orders (id TEXT PRIMARY KEY, serial INTEGER NOT NULL, serial_status TEXT NOT NULL)',
+          );
           await database.insert('order_items', {'id': 'old-item', 'name': '米粉'});
         },
       ),
@@ -207,6 +210,33 @@ void main() {
       expect(item['name'], '米粉');
       expect(item['menu_item_id'], isNull);
       expect(item['menu_legacy_id'], isNull);
+    } finally {
+      await upgraded.close();
+    }
+  });
+
+  test('upgrades version 3 and preserves only known provisional serials', () async {
+    final oldPath = path.join(directory.path, 'version3.db');
+    final oldDatabase = await databaseFactoryFfi.openDatabase(
+      oldPath,
+      options: OpenDatabaseOptions(
+        version: 3,
+        onCreate: (database, version) async {
+          await database.execute(
+            'CREATE TABLE orders (id TEXT PRIMARY KEY, serial INTEGER NOT NULL, serial_status TEXT NOT NULL)',
+          );
+          await database.insert('orders', {'id': 'pending', 'serial': 10, 'serial_status': 'PROVISIONAL'});
+          await database.insert('orders', {'id': 'legacy', 'serial': 11, 'serial_status': 'UNKNOWN'});
+        },
+      ),
+    );
+    await oldDatabase.close();
+    final upgraded = await LocalDatabase.open(factory: databaseFactoryFfi, databasePath: oldPath);
+    try {
+      final pending = (await upgraded.database.query('orders', where: 'id = ?', whereArgs: ['pending'])).single;
+      final legacy = (await upgraded.database.query('orders', where: 'id = ?', whereArgs: ['legacy'])).single;
+      expect(pending['provisional_serial'], 10);
+      expect(legacy['provisional_serial'], isNull);
     } finally {
       await upgraded.close();
     }
@@ -256,6 +286,8 @@ void main() {
     await store.close();
     store = await LocalDatabase.open(factory: databaseFactoryFfi, databasePath: databasePath);
     expect(await store.localOrders(), hasLength(3));
+    expect((await store.localOrder(firstToday.id))?['id'], firstToday.id);
+    expect(await store.localOrder('missing'), isNull);
     final order = (await store.database.query('orders', where: 'id = ?', whereArgs: [firstToday.id])).single;
     expect(order['sync_status'], 'PENDING_SYNC');
     expect(order['serial_status'], 'PROVISIONAL');
@@ -299,6 +331,77 @@ void main() {
     expect(await store.database.query('orders'), isEmpty);
     expect(await store.database.query('order_items'), isEmpty);
     expect(await store.database.query('sync_outbox'), isEmpty);
+  });
+
+  test('preserves a failed operation and commits official serial with outbox removal', () async {
+    await store.replaceVisibleMenu([remoteMenuItem()]);
+    final draft = await draftFor(store, DateTime.utc(2026, 11, 13));
+    final saved = await store.savePendingOrder(draft);
+    final before = (await store.pendingOrderOperations()).single;
+    await store.recordOrderSyncFailure(draft.operationId, 'NETWORK');
+    final pending = (await store.pendingOrderOperations()).single;
+    expect(pending['retry_count'], 1);
+    expect(pending['last_error'], 'NETWORK');
+    expect(pending['payload'], before['payload']);
+    expect((await store.localOrders()).single['sync_status'], 'SYNC_FAILED');
+    await store.completeOrderSync(
+      operationId: draft.operationId,
+      orderId: draft.id,
+      serial: 14,
+      businessDate: saved.businessDate,
+    );
+    final order = (await store.localOrders()).single;
+    expect(order['serial'], 14);
+    expect(order['provisional_serial'], saved.serial);
+    expect(order['serial_status'], 'ASSIGNED');
+    expect(order['sync_status'], 'SYNCED');
+    expect(await store.pendingOrderOperations(), isEmpty);
+  });
+
+  test('rejects inconsistent acknowledgements without deleting the pending operation', () async {
+    await store.replaceVisibleMenu([remoteMenuItem()]);
+    final draft = await draftFor(store, DateTime.utc(2026, 11, 13));
+    await store.savePendingOrder(draft);
+    for (final (orderId, serial, businessDate) in [
+      ('wrong-order', 10, '2026-11-13'),
+      (draft.id, 9, '2026-11-13'),
+      (draft.id, 10, '2026-11-14'),
+    ]) {
+      await expectLater(
+        store.completeOrderSync(
+          operationId: draft.operationId,
+          orderId: orderId,
+          serial: serial,
+          businessDate: businessDate,
+        ),
+        throwsStateError,
+      );
+      expect(await store.pendingOrderOperations(), hasLength(1));
+      expect((await store.localOrders()).single['serial_status'], 'PROVISIONAL');
+    }
+  });
+
+  test('rolls back official serial if removing the acknowledged outbox fails', () async {
+    await store.replaceVisibleMenu([remoteMenuItem()]);
+    final draft = await draftFor(store, DateTime.utc(2026, 11, 13));
+    final saved = await store.savePendingOrder(draft);
+    await store.database.execute(
+      "CREATE TRIGGER reject_outbox_delete BEFORE DELETE ON sync_outbox BEGIN SELECT RAISE(FAIL, 'test'); END",
+    );
+    await expectLater(
+      store.completeOrderSync(
+        operationId: draft.operationId,
+        orderId: draft.id,
+        serial: 14,
+        businessDate: saved.businessDate,
+      ),
+      throwsA(isA<DatabaseException>()),
+    );
+    final order = (await store.localOrders()).single;
+    expect(order['serial'], saved.serial);
+    expect(order['serial_status'], 'PROVISIONAL');
+    expect(order['sync_status'], 'PENDING_SYNC');
+    expect(await store.pendingOrderOperations(), hasLength(1));
   });
 
   test('rolls back the provisional number and order when the outbox insert fails', () async {

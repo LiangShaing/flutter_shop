@@ -54,16 +54,18 @@ class LocalDatabase {
     final database = await selectedFactory.openDatabase(
       filePath,
       options: OpenDatabaseOptions(
-        version: 3,
+        version: 4,
         onConfigure: (database) => database.execute('PRAGMA foreign_keys = ON'),
         onCreate: (database, version) async {
           await _createSchema(database, version);
           await _migrateToVersion2(database);
           await _migrateToVersion3(database);
+          await _migrateToVersion4(database);
         },
         onUpgrade: (database, oldVersion, newVersion) async {
           if (oldVersion < 2) await _migrateToVersion2(database);
           if (oldVersion < 3) await _migrateToVersion3(database);
+          if (oldVersion < 4) await _migrateToVersion4(database);
         },
       ),
     );
@@ -96,6 +98,11 @@ class LocalDatabase {
   static Future<void> _migrateToVersion3(Database database) async {
     await database.execute('ALTER TABLE order_items ADD COLUMN menu_item_id TEXT');
     await database.execute('ALTER TABLE order_items ADD COLUMN menu_legacy_id TEXT');
+  }
+
+  static Future<void> _migrateToVersion4(Database database) async {
+    await database.execute('ALTER TABLE orders ADD COLUMN provisional_serial INTEGER');
+    await database.execute("UPDATE orders SET provisional_serial = serial WHERE serial_status = 'PROVISIONAL'");
   }
 
   static Future<void> _createSchema(Database database, int version) async {
@@ -215,8 +222,64 @@ class LocalDatabase {
   Future<List<Map<String, Object?>>> localOrders() =>
       database.query('orders', orderBy: 'datetime(order_date) DESC, rowid DESC');
 
+  Future<Map<String, Object?>?> localOrder(String orderId) async {
+    final orders = await database.query('orders', where: 'id = ?', whereArgs: [orderId], limit: 1);
+    return orders.isEmpty ? null : orders.single;
+  }
+
   Future<List<Map<String, Object?>>> localOrderItems(String orderId) =>
       database.query('order_items', where: 'order_id = ?', whereArgs: [orderId], orderBy: 'rowid ASC');
+
+  Future<List<Map<String, Object?>>> pendingOrderOperations() => database.query(
+    'sync_outbox',
+    where: 'operation = ?',
+    whereArgs: ['CREATE'],
+    orderBy: 'created_at ASC, rowid ASC',
+  );
+
+  Future<void> recordOrderSyncFailure(String operationId, String errorCode) =>
+      database.transaction((transaction) async {
+        final operations = await transaction.query('sync_outbox', where: 'operation_id = ?', whereArgs: [operationId]);
+        if (operations.length != 1) throw StateError('Pending operation not found');
+        final operation = operations.single;
+        await transaction.update(
+          'sync_outbox',
+          {'retry_count': (operation['retry_count'] as int) + 1, 'last_error': errorCode},
+          where: 'operation_id = ?',
+          whereArgs: [operationId],
+        );
+        final changed = await transaction.update(
+          'orders',
+          {'sync_status': 'SYNC_FAILED'},
+          where: 'id = ? AND sync_status IN (?, ?)',
+          whereArgs: [operation['order_id'], 'PENDING_SYNC', 'SYNC_FAILED'],
+        );
+        if (changed != 1) throw StateError('Pending order not found');
+      });
+
+  Future<void> completeOrderSync({
+    required String operationId,
+    required String orderId,
+    required int serial,
+    required String businessDate,
+  }) => database.transaction((transaction) async {
+    if (serial < 10) throw StateError('Invalid official serial');
+    final operations = await transaction.query('sync_outbox', where: 'operation_id = ?', whereArgs: [operationId]);
+    if (operations.length != 1 ||
+        operations.single['order_id'] != orderId ||
+        operations.single['operation'] != 'CREATE') {
+      throw StateError('Pending operation mismatch');
+    }
+    final updated = await transaction.update(
+      'orders',
+      {'serial': serial, 'serial_status': 'ASSIGNED', 'sync_status': 'SYNCED'},
+      where: 'id = ? AND business_date = ? AND serial_status = ? AND sync_status IN (?, ?)',
+      whereArgs: [orderId, businessDate, 'PROVISIONAL', 'PENDING_SYNC', 'SYNC_FAILED'],
+    );
+    if (updated != 1) throw StateError('Pending order or business date mismatch');
+    final deleted = await transaction.delete('sync_outbox', where: 'operation_id = ?', whereArgs: [operationId]);
+    if (deleted != 1) throw StateError('Pending operation could not be removed');
+  });
 
   Future<SavedOrder> savePendingOrder(OrderDraft draft) => database.transaction((transaction) async {
     final existing = await transaction.query('sync_outbox', where: 'operation_id = ?', whereArgs: [draft.operationId]);
@@ -263,6 +326,7 @@ class LocalDatabase {
       'takeout': draft.serviceType == ServiceType.takeout ? 1 : 0,
       'uber': draft.serviceType == ServiceType.uber ? 1 : 0,
       'serial': serial,
+      'provisional_serial': serial,
       'serial_status': 'PROVISIONAL',
       'business_date': day,
       'total_price': draft.total,
