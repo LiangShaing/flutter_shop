@@ -63,4 +63,14 @@ class OrderOptions extends ChangeNotifier {
     _paymentInput = value;
     notifyListeners();
   }
+
+  void reset() {
+    _serviceType = null;
+    _excludeSauerkraut = false;
+    _excludeGinger = false;
+    _spiceLevel = 0;
+    _mark = '';
+    _paymentInput = '';
+    notifyListeners();
+  }
 }

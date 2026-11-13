@@ -13,8 +13,11 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:flutter_shop/main.dart';
 import 'package:flutter_shop/cart_controller.dart';
+import 'package:flutter_shop/local_database.dart';
+import 'package:flutter_shop/local_orders_page.dart';
 import 'package:flutter_shop/menu_controller.dart';
 import 'package:flutter_shop/menu_page.dart';
+import 'package:flutter_shop/order_draft.dart';
 import 'package:flutter_shop/order_options.dart';
 import 'package:flutter_shop/orders_page.dart';
 
@@ -495,6 +498,247 @@ void main() {
     expect(cart.options.receivedAmount, 0);
   });
 
+  testWidgets('saves a pending local order and resets the cart only after success', (tester) async {
+    final item = menuItem(id: 'menu-1', name: '米粉', subName: '湯', price: 50);
+    final cart = CartController();
+    addTearDown(cart.dispose);
+    final drafts = <OrderDraft>[];
+    Future<SavedOrder> save(OrderDraft draft) async {
+      drafts.add(draft);
+      return SavedOrder(id: draft.id, serial: 10, businessDate: '2026-11-13');
+    }
+
+    cart.setQuantity(item, 2);
+    cart.options.setServiceType(ServiceType.uber);
+    cart.options.setSpiceLevel(2);
+    cart.options.setPaymentInput('100');
+    await tester.pumpWidget(cartScreen(cart: cart, items: [item], saveOrder: save));
+    await tester.tap(find.byTooltip('查看已選'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.widgetWithText(FilledButton, '存入本機'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('存入本機'));
+    await tester.pumpAndSettle();
+    expect(find.text('已存入本機'), findsOneWidget);
+    expect(find.textContaining('暫定流水號 10'), findsOneWidget);
+    expect(find.textContaining('待同步，尚未上傳或列印'), findsOneWidget);
+    expect(cart.items, isEmpty);
+    expect(cart.options.serviceType, isNull);
+    expect(drafts.single.serviceType, ServiceType.uber);
+    expect(drafts.single.spiceLevel, 2);
+    expect(drafts.single.total, 100);
+  });
+
+  testWidgets('keeps the cart and stable draft when local saving fails', (tester) async {
+    final cart = CartController();
+    addTearDown(cart.dispose);
+    final item = menuItem(id: '1', name: '米粉', price: 50);
+    cart.add(item);
+    cart.options.setServiceType(ServiceType.dineIn);
+    final attempts = <OrderDraft>[];
+    final pending = Completer<SavedOrder>();
+    Future<SavedOrder> save(OrderDraft draft) {
+      attempts.add(draft);
+      if (attempts.length == 1) return pending.future;
+      return Future.value(const SavedOrder(id: 'saved', serial: 10, businessDate: '2026-11-13'));
+    }
+
+    await tester.pumpWidget(cartScreen(cart: cart, items: [item], saveOrder: save));
+    await tester.tap(find.byTooltip('查看已選'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('存入本機'),
+      100,
+      scrollable: find.descendant(of: find.byType(BottomSheet), matching: find.byType(Scrollable)).first,
+    );
+    await tester.tap(find.text('存入本機'));
+    await tester.pump();
+    expect(find.text('儲存中'), findsOneWidget);
+    await tester.binding.handlePopRoute();
+    await tester.pump();
+    expect(find.byType(BottomSheet), findsOneWidget);
+    expect(attempts, hasLength(1));
+    pending.completeError(StateError('test'));
+    await tester.pumpAndSettle();
+    expect(find.text('存單失敗，已保留選餐，請重試'), findsOneWidget);
+    expect(cart.quantity, 1);
+    await tester.ensureVisible(find.widgetWithText(FilledButton, '存入本機'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('存入本機'));
+    await tester.pumpAndSettle();
+    expect(attempts, hasLength(2));
+    expect(attempts[1].id, attempts[0].id);
+    expect(attempts[1].operationId, attempts[0].operationId);
+    expect(find.text('已存入本機'), findsOneWidget);
+  });
+
+  testWidgets('requires a service type before saving without clearing the cart', (tester) async {
+    final cart = CartController();
+    addTearDown(cart.dispose);
+    final item = menuItem(id: '1', name: '米粉', price: 50);
+    cart.add(item);
+    var saveCalls = 0;
+    await tester.pumpWidget(
+      cartScreen(
+        cart: cart,
+        items: [item],
+        saveOrder: (draft) async {
+          saveCalls++;
+          return const SavedOrder(id: 'saved', serial: 10, businessDate: '2026-11-13');
+        },
+      ),
+    );
+    await tester.tap(find.byTooltip('查看已選'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('存入本機'),
+      100,
+      scrollable: find.descendant(of: find.byType(BottomSheet), matching: find.byType(Scrollable)).first,
+    );
+    await tester.tap(find.text('存入本機'));
+    await tester.pumpAndSettle();
+    expect(find.text('請選擇內用、外帶或 Uber'), findsOneWidget);
+    expect(saveCalls, 0);
+    expect(cart.quantity, 1);
+  });
+
+  testWidgets('keeps selection when malformed menu data cannot form a draft', (tester) async {
+    final cart = CartController();
+    addTearDown(cart.dispose);
+    final item = {...menuItem(id: '1', name: '米粉', price: 50)}..remove('sid');
+    cart.add(item);
+    cart.options.setServiceType(ServiceType.dineIn);
+    var saveCalls = 0;
+    await tester.pumpWidget(
+      cartScreen(
+        cart: cart,
+        items: [item],
+        saveOrder: (draft) async {
+          saveCalls++;
+          return const SavedOrder(id: 'saved', serial: 10, businessDate: '2026-11-13');
+        },
+      ),
+    );
+    await tester.tap(find.byTooltip('查看已選'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('存入本機'),
+      100,
+      scrollable: find.descendant(of: find.byType(BottomSheet), matching: find.byType(Scrollable)).first,
+    );
+    await tester.tap(find.text('存入本機'));
+    await tester.pumpAndSettle();
+    expect(find.text('無法建立訂單，請檢查選餐資料'), findsOneWidget);
+    expect(saveCalls, 0);
+    expect(cart.quantity, 1);
+  });
+
+  testWidgets('shows pending provisional local orders and their snapshots', (tester) async {
+    final order = localOrder();
+    Map<String, Object?>? opened;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: LocalOrdersView(orders: Future.value([order]), onOpen: (value) => opened = value),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('暫定流水號 10'), findsOneWidget);
+    expect(find.text('2026-11-13 10:00:00 · 待同步'), findsOneWidget);
+    await tester.tap(find.text('暫定流水號 10'));
+    expect(opened, same(order));
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: LocalOrderDetailsView(
+            order: order,
+            items: Future.value([
+              {'name': '米粉', 'show_name': '湯', 'price': 50, 'quantity': 2},
+            ]),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('暫定流水號 10'), findsOneWidget);
+    expect(find.text('2026-11-13 10:00:00 · 待同步'), findsOneWidget);
+    expect(find.text('Uber · 總額 NT\$ 100 · 實收 NT\$ 80'), findsOneWidget);
+    expect(find.text('酸菜：不加 · 薑絲：加 · 大辣'), findsOneWidget);
+    expect(find.text('標註：少湯'), findsOneWidget);
+    expect(find.text('米粉-湯'), findsOneWidget);
+    expect(find.text('× 2  ·  NT\$ 50'), findsOneWidget);
+  });
+
+  testWidgets('shows empty and error states for local order queries', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: LocalOrdersView(orders: Future.value([]), onOpen: (_) {}),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('目前沒有本機訂單'), findsOneWidget);
+    final failed = Completer<List<Map<String, Object?>>>();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: LocalOrdersView(orders: failed.future, onOpen: (_) {}),
+        ),
+      ),
+    );
+    failed.completeError(StateError('database unavailable'));
+    await tester.pumpAndSettle();
+    expect(find.text('無法讀取本機訂單'), findsOneWidget);
+  });
+
+  testWidgets('does not invent a serial state or spice level for legacy records', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: LocalOrderDetailsView(
+            order: {...localOrder(), 'serial_status': 'UNKNOWN', 'chili_level': null, 'chili': 1},
+            items: Future.value([]),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('流水號 10（狀態未知）'), findsOneWidget);
+    expect(find.textContaining('加辣（級別未知）'), findsOneWidget);
+  });
+
+  testWidgets('local order details fit long values on a phone with enlarged text', (tester) async {
+    tester.view.physicalSize = const Size(320, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(context).copyWith(textScaler: const TextScaler.linear(2)),
+          child: child!,
+        ),
+        home: Scaffold(
+          body: LocalOrderDetailsView(
+            order: localOrder(),
+            items: Future.value([
+              {'name': '非常長的餐點名稱需要完整顯示', 'show_name': '湯', 'price': 999999999, 'quantity': 999999},
+            ]),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('非常長的餐點名稱需要完整顯示-湯'),
+      100,
+      scrollable: find.descendant(of: find.byType(LocalOrderDetailsView), matching: find.byType(Scrollable)).first,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('selects quantities and calculates the total', (tester) async {
     tester.view.physicalSize = const Size(320, 640);
     tester.view.devicePixelRatio = 1;
@@ -631,17 +875,41 @@ void main() {
   });
 }
 
-Widget cartScreen({required CartController cart, required List<Map<String, Object?>> items}) => MaterialApp(
+Widget cartScreen({
+  required CartController cart,
+  required List<Map<String, Object?>> items,
+  Future<SavedOrder> Function(OrderDraft)? saveOrder,
+}) => MaterialApp(
   home: Scaffold(
     appBar: AppBar(
-      actions: [MenuCartAction(cart: cart, currentMenu: () => items)],
+      actions: [MenuCartAction(cart: cart, currentMenu: () => items, saveOrder: saveOrder)],
     ),
     body: MenuView(state: MenuSyncState.synced, items: items, cart: cart),
   ),
 );
 
+Map<String, Object?> localOrder() => {
+  'id': 'order-1',
+  'serial': 10,
+  'serial_status': 'PROVISIONAL',
+  'business_date': '2026-11-13',
+  'sync_status': 'PENDING_SYNC',
+  'order_date': '2026-11-13T02:00:00Z',
+  'total_price': 100,
+  'get_pay': 80,
+  'uber': 1,
+  'takeout': 0,
+  'sauerkraut': 0,
+  'ginger': 1,
+  'chili': 1,
+  'chili_level': 3,
+  'mark': '少湯',
+};
+
 Map<String, Object?> menuItem({required String id, required String name, String subName = '', required int price}) => {
   'id': id,
+  'sid': 43,
+  'item_type': 'product',
   'menu_row': '2',
   'name': name,
   'sub_name': subName,

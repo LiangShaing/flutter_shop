@@ -82,6 +82,12 @@ class CartController extends ChangeNotifier {
     if (_items.remove(key) != null) notifyListeners();
   }
 
+  void clear() {
+    _items.clear();
+    options.reset();
+    notifyListeners();
+  }
+
   int quantityFor(Map<String, Object?> item) => _items[cartItemKey(item)]?.quantity ?? 0;
 
   bool hasConflict(CartItem selected, List<Map<String, Object?>> menu) {
@@ -92,6 +98,8 @@ class CartController extends ChangeNotifier {
 
   bool _changed(Map<String, Object?> selected, Map<String, Object?> current) =>
       current['is_available'] != 1 ||
+      selected['sid'] != current['sid'] ||
+      selected['item_type'] != current['item_type'] ||
       selected['name'] != current['name'] ||
       selected['sub_name'] != current['sub_name'] ||
       selected['price'] != current['price'];

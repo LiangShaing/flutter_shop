@@ -2,7 +2,10 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_shop/cart_controller.dart';
 import 'package:flutter_shop/local_database.dart';
+import 'package:flutter_shop/order_draft.dart';
+import 'package:flutter_shop/order_options.dart';
 import 'package:path/path.dart' as path;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
@@ -136,6 +139,221 @@ void main() {
       throwsA(isA<DatabaseException>()),
     );
   });
+
+  test('uses the Taipei calendar day independently of device timezone', () {
+    expect(LocalDatabase.businessDate(DateTime.utc(2026, 11, 12, 15, 59, 59)), '2026-11-12');
+    expect(LocalDatabase.businessDate(DateTime.utc(2026, 11, 12, 16)), '2026-11-13');
+    expect(LocalDatabase.taipeiTimestamp('2026-11-12T16:00:00Z'), '2026-11-13 00:00:00');
+    expect(LocalDatabase.taipeiTimestamp('2026-11-12T16:00:00'), isNull);
+  });
+
+  test('upgrades version 1 without inventing legacy spice levels or serial status', () async {
+    final oldPath = path.join(directory.path, 'version1.db');
+    final oldDatabase = await databaseFactoryFfi.openDatabase(
+      oldPath,
+      options: OpenDatabaseOptions(
+        version: 1,
+        onCreate: (database, version) async {
+          await database.execute(
+            'CREATE TABLE orders (id TEXT PRIMARY KEY, order_date TEXT NOT NULL, chili INTEGER NOT NULL, serial INTEGER NOT NULL)',
+          );
+          await database.execute('CREATE TABLE order_items (id TEXT PRIMARY KEY)');
+          await database.insert('orders', {
+            'id': 'legacy',
+            'order_date': '2026-11-12T16:00:00Z',
+            'chili': 1,
+            'serial': 10,
+          });
+          await database.insert('orders', {
+            'id': 'ambiguous',
+            'order_date': '2026-11-12T16:00:00',
+            'chili': 0,
+            'serial': 11,
+          });
+        },
+      ),
+    );
+    await oldDatabase.close();
+    final upgraded = await LocalDatabase.open(factory: databaseFactoryFfi, databasePath: oldPath);
+    try {
+      final legacy = (await upgraded.database.query('orders', where: 'id = ?', whereArgs: ['legacy'])).single;
+      expect(legacy['business_date'], '2026-11-13');
+      expect(legacy['chili'], 1);
+      expect(legacy['chili_level'], isNull);
+      expect(legacy['serial_status'], 'UNKNOWN');
+      final ambiguous = (await upgraded.database.query('orders', where: 'id = ?', whereArgs: ['ambiguous'])).single;
+      expect(ambiguous['business_date'], isNull);
+    } finally {
+      await upgraded.close();
+    }
+  });
+
+  test('upgrades version 2 without guessing old menu identities', () async {
+    final oldPath = path.join(directory.path, 'version2.db');
+    final oldDatabase = await databaseFactoryFfi.openDatabase(
+      oldPath,
+      options: OpenDatabaseOptions(
+        version: 2,
+        onCreate: (database, version) async {
+          await database.execute('CREATE TABLE order_items (id TEXT PRIMARY KEY, name TEXT NOT NULL)');
+          await database.insert('order_items', {'id': 'old-item', 'name': '米粉'});
+        },
+      ),
+    );
+    await oldDatabase.close();
+    final upgraded = await LocalDatabase.open(factory: databaseFactoryFfi, databasePath: oldPath);
+    try {
+      final item = (await upgraded.database.query('order_items')).single;
+      expect(item['name'], '米粉');
+      expect(item['menu_item_id'], isNull);
+      expect(item['menu_legacy_id'], isNull);
+    } finally {
+      await upgraded.close();
+    }
+  });
+
+  test('saves an offline selection after cloud identity changes using legacy identity', () async {
+    final seed = jsonEncode([
+      {
+        '_id': {'\$oid': 'legacy-1'},
+        'sid': {'\$numberInt': '43'},
+        'type': 'mainProduct',
+        'row': '2',
+        'name': '米粉',
+        'subName': '湯',
+        'price': {'\$numberInt': '50'},
+        'disabled': false,
+      },
+    ]);
+    await store.seedMenu(source: SeedMenuSource.offline, json: seed);
+    final draft = await draftFor(store, DateTime.utc(2026, 11, 13));
+    final offlineId = draft.items.single.menuId;
+    await store.replaceVisibleMenu([remoteMenuItem()]);
+    final result = await store.savePendingOrder(draft);
+    final detail = (await store.localOrderItems(result.id)).single;
+    expect(detail['menu_item_id'], offlineId);
+    expect(detail['menu_legacy_id'], 'legacy-1');
+  });
+
+  test('saves provisional serials, four-level spice, snapshots, and outbox atomically', () async {
+    await store.replaceVisibleMenu([remoteMenuItem()]);
+    final previousDay = await draftFor(store, DateTime.utc(2026, 11, 12, 15, 59, 59));
+    final first = await store.savePendingOrder(previousDay);
+    expect(first.serial, 10);
+    expect(first.businessDate, '2026-11-12');
+
+    final firstToday = await draftFor(store, DateTime.utc(2026, 11, 12, 16));
+    final secondToday = await draftFor(store, DateTime.utc(2026, 11, 12, 16, 1));
+    final saved = await Future.wait([store.savePendingOrder(firstToday), store.savePendingOrder(secondToday)]);
+    expect(saved.map((order) => order.serial).toSet(), {10, 11});
+    expect(saved.every((order) => order.businessDate == '2026-11-13'), isTrue);
+    final retried = await store.savePendingOrder(firstToday);
+    expect(retried.serial, saved.first.serial);
+    expect(await store.database.query('orders'), hasLength(3));
+    expect(await store.database.query('order_items'), hasLength(3));
+    expect(await store.database.query('sync_outbox'), hasLength(3));
+
+    await store.close();
+    store = await LocalDatabase.open(factory: databaseFactoryFfi, databasePath: databasePath);
+    expect(await store.localOrders(), hasLength(3));
+    final order = (await store.database.query('orders', where: 'id = ?', whereArgs: [firstToday.id])).single;
+    expect(order['sync_status'], 'PENDING_SYNC');
+    expect(order['serial_status'], 'PROVISIONAL');
+    expect(order['business_date'], '2026-11-13');
+    expect(order['chili'], 1);
+    expect(order['chili_level'], 3);
+    expect(order['uber'], 1);
+    expect(order['takeout'], 0);
+    expect(order['sauerkraut'], 0);
+    expect(order['get_pay'], 100);
+    final detail = (await store.database.query(
+      'order_items',
+      where: 'order_id = ?',
+      whereArgs: [firstToday.id],
+    )).single;
+    expect(detail['show_name'], '湯');
+    expect(detail['menu_item_id'], 'cloud-1');
+    expect(detail['menu_legacy_id'], 'legacy-1');
+    expect(await store.localOrderItems(firstToday.id), hasLength(1));
+    expect(detail['price'], 50);
+    expect(detail['quantity'], 2);
+    final operation = (await store.database.query(
+      'sync_outbox',
+      where: 'order_id = ?',
+      whereArgs: [firstToday.id],
+    )).single;
+    expect(operation['operation_id'], firstToday.operationId);
+    expect((jsonDecode(operation['payload'] as String)['order'] as Map)['serial_status'], 'PROVISIONAL');
+    final payloadItems = jsonDecode(operation['payload'] as String)['items'] as List;
+    expect(payloadItems.single['menu_item_id'], 'cloud-1');
+    expect(payloadItems.single['menu_legacy_id'], 'legacy-1');
+  });
+
+  test('rejects changed menu snapshots without creating an order', () async {
+    await store.replaceVisibleMenu([remoteMenuItem()]);
+    final draft = await draftFor(store, DateTime.utc(2026, 11, 13));
+    await store.replaceVisibleMenu([
+      {...remoteMenuItem(), 'price': 60},
+    ]);
+    await expectLater(store.savePendingOrder(draft), throwsA(isA<OrderMenuChangedException>()));
+    expect(await store.database.query('orders'), isEmpty);
+    expect(await store.database.query('order_items'), isEmpty);
+    expect(await store.database.query('sync_outbox'), isEmpty);
+  });
+
+  test('rolls back the provisional number and order when the outbox insert fails', () async {
+    await store.replaceVisibleMenu([remoteMenuItem()]);
+    final draft = await draftFor(store, DateTime.utc(2026, 11, 13));
+    await store.database.execute(
+      "CREATE TRIGGER reject_outbox BEFORE INSERT ON sync_outbox BEGIN SELECT RAISE(FAIL, 'test'); END",
+    );
+    await expectLater(store.savePendingOrder(draft), throwsA(isA<DatabaseException>()));
+    expect(await store.database.query('orders'), isEmpty);
+    expect(await store.database.query('order_items'), isEmpty);
+    expect(await store.database.query('sync_outbox'), isEmpty);
+    await store.database.execute('DROP TRIGGER reject_outbox');
+    expect((await store.savePendingOrder(draft)).serial, 10);
+  });
+
+  test('does not allocate a number when existing order dates have unknown timezone', () async {
+    await store.replaceVisibleMenu([remoteMenuItem()]);
+    await store.database.insert('orders', {...order(), 'sync_status': 'PENDING_SYNC'});
+    final draft = await draftFor(store, DateTime.utc(2026, 11, 13));
+    await expectLater(store.savePendingOrder(draft), throwsA(isA<UnknownOrderDateException>()));
+    expect(await store.database.query('orders'), hasLength(1));
+    expect(await store.database.query('sync_outbox'), isEmpty);
+  });
+
+  test('sorts local orders by their actual instants across UTC offsets', () async {
+    await store.createOrder(
+      order: {...order(), 'id': 'earlier', 'order_date': '2026-11-13T10:00:00+08:00'},
+      items: [item()],
+      operationId: 'earlier-operation',
+    );
+    await store.createOrder(
+      order: {...order(), 'id': 'later', 'order_date': '2026-11-13T03:00:00Z'},
+      items: [
+        {...item(), 'id': 'later-item'},
+      ],
+      operationId: 'later-operation',
+    );
+    expect((await store.localOrders()).map((order) => order['id']), ['later', 'earlier']);
+  });
+}
+
+Future<OrderDraft> draftFor(LocalDatabase store, DateTime date) async {
+  final cart = CartController();
+  try {
+    cart.setQuantity((await store.menuItems()).single, 2);
+    cart.options.setServiceType(ServiceType.uber);
+    cart.options.setExcludeSauerkraut(true);
+    cart.options.setSpiceLevel(3);
+    cart.options.setPaymentInput('100');
+    cart.options.setMark('少湯');
+    return OrderDraft.fromCart(cart, now: date);
+  } finally {
+    cart.dispose();
+  }
 }
 
 Map<String, Object?> order() => {

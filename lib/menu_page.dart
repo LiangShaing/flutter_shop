@@ -6,10 +6,10 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'cart_controller.dart';
 import 'local_database.dart';
-import 'main.dart' show SupabaseSetupPage;
+import 'local_orders_page.dart';
 import 'menu_controller.dart';
+import 'order_draft.dart';
 import 'order_options.dart';
-import 'orders_page.dart';
 
 class MenuPage extends StatefulWidget {
   const MenuPage({super.key, required this.client});
@@ -137,22 +137,23 @@ class _MenuPageState extends State<MenuPage> with WidgetsBindingObserver {
                     ),
                   ),
           ),
-          MenuCartAction(cart: _cart, menuUpdates: controller, currentMenu: () => controller?.items ?? const []),
-          if (widget.client != null)
-            IconButton(
-              tooltip: '訂單',
-              onPressed: () => Navigator.of(
-                context,
-              ).push(MaterialPageRoute<void>(builder: (_) => OrdersPage(client: widget.client!))),
-              icon: const Icon(Icons.receipt_long_outlined),
-            )
-          else
-            IconButton(
-              tooltip: 'Supabase 設定',
-              onPressed: () =>
-                  Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const SupabaseSetupPage())),
-              icon: const Icon(Icons.settings_outlined),
-            ),
+          MenuCartAction(
+            cart: _cart,
+            menuUpdates: controller,
+            currentMenu: () => controller?.items ?? const [],
+            saveOrder: controller?.store.savePendingOrder,
+          ),
+          IconButton(
+            tooltip: '訂單',
+            onPressed: controller == null
+                ? null
+                : () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => LocalOrdersPage(store: controller.store, client: widget.client),
+                    ),
+                  ),
+            icon: const Icon(Icons.receipt_long_outlined),
+          ),
           IconButton(
             tooltip: '重新整理菜單',
             onPressed: widget.client == null || controller == null
@@ -230,11 +231,12 @@ class MenuSyncStatus extends StatelessWidget {
 }
 
 class MenuCartAction extends StatelessWidget {
-  const MenuCartAction({super.key, required this.cart, required this.currentMenu, this.menuUpdates});
+  const MenuCartAction({super.key, required this.cart, required this.currentMenu, this.menuUpdates, this.saveOrder});
 
   final CartController cart;
   final List<Map<String, Object?>> Function() currentMenu;
   final Listenable? menuUpdates;
+  final Future<SavedOrder> Function(OrderDraft)? saveOrder;
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
@@ -248,7 +250,9 @@ class MenuCartAction extends StatelessWidget {
           button: true,
           enabled: cart.quantity > 0,
           child: InkWell(
-            onTap: cart.quantity == 0 ? null : () => _showSelectedItems(context, cart, currentMenu, menuUpdates),
+            onTap: cart.quantity == 0
+                ? null
+                : () => _showSelectedItems(context, cart, currentMenu, menuUpdates, saveOrder),
             child: SizedBox(
               width: 60,
               height: kToolbarHeight,
@@ -283,121 +287,256 @@ void _showSelectedItems(
   CartController cart,
   List<Map<String, Object?>> Function() currentMenu,
   Listenable? menuUpdates,
+  Future<SavedOrder> Function(OrderDraft)? saveOrder,
 ) {
   showModalBottomSheet<void>(
     context: context,
     showDragHandle: true,
     isScrollControlled: true,
-    builder: (context) => ListenableBuilder(
-      listenable: Listenable.merge([cart, cart.options, ?menuUpdates]),
-      builder: (context, _) => SafeArea(
-        child: Padding(
-          padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
-          child: SizedBox(
-            height: (MediaQuery.sizeOf(context).height - MediaQuery.viewInsetsOf(context).bottom) * 0.75,
-            child: ListView(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-                  child: Row(
-                    children: [
-                      Expanded(child: Text('已選品項', style: Theme.of(context).textTheme.titleLarge)),
-                      Text('NT\$ ${cart.total}', style: Theme.of(context).textTheme.titleMedium),
-                    ],
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-                  child: SegmentedButton<ServiceType>(
-                    segments: const [
-                      ButtonSegment(value: ServiceType.dineIn, label: Text('內用')),
-                      ButtonSegment(value: ServiceType.takeout, label: Text('外帶')),
-                      ButtonSegment(value: ServiceType.uber, label: Text('Uber')),
-                    ],
-                    selected: {if (cart.options.serviceType != null) cart.options.serviceType!},
-                    emptySelectionAllowed: true,
-                    onSelectionChanged: (selection) =>
-                        cart.options.setServiceType(selection.isEmpty ? null : selection.single),
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-                  child: TextFormField(
-                    key: const ValueKey('order-payment'),
-                    initialValue: cart.options.paymentInput,
-                    onChanged: cart.options.setPaymentInput,
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    decoration: InputDecoration(
-                      labelText: '實收金額',
-                      prefixIcon: const Icon(Icons.payments_outlined),
-                      errorText: cart.options.receivedAmount == null ? '金額過大，請重新輸入' : null,
-                    ),
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-                  child: Text(
-                    cart.options.changeFor(cart.total) == null
-                        ? '找零：--'
-                        : '找零：NT\$ ${cart.options.changeFor(cart.total)}',
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-                  child: TextFormField(
-                    key: const ValueKey('order-mark'),
-                    initialValue: cart.options.mark,
-                    onChanged: cart.options.setMark,
-                    decoration: const InputDecoration(labelText: '標註 / 備註'),
-                  ),
-                ),
-                if (cart.items.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.all(24),
-                    child: Center(child: Text('尚未選餐')),
-                  )
-                else
-                  ...cart.items.entries.map((entry) {
-                    final selected = entry.value;
-                    final item = selected.snapshot;
-                    final conflict = cart.hasConflict(selected, currentMenu());
-                    final subName = item['sub_name'] as String;
-                    final name = '${item['name']}${subName.isEmpty ? '' : '-$subName'}';
-                    return ListTile(
-                      title: Text(name),
-                      subtitle: Text(conflict ? '菜單已變更或停售，請移除後重新選擇' : '單價 NT\$ ${item['price']}'),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
+    isDismissible: false,
+    enableDrag: false,
+    builder: (_) => _SelectedItemsSheet(
+      parentContext: context,
+      cart: cart,
+      currentMenu: currentMenu,
+      menuUpdates: menuUpdates,
+      saveOrder: saveOrder,
+    ),
+  );
+}
+
+class _SelectedItemsSheet extends StatefulWidget {
+  const _SelectedItemsSheet({
+    required this.parentContext,
+    required this.cart,
+    required this.currentMenu,
+    this.menuUpdates,
+    this.saveOrder,
+  });
+
+  final BuildContext parentContext;
+  final CartController cart;
+  final List<Map<String, Object?>> Function() currentMenu;
+  final Listenable? menuUpdates;
+  final Future<SavedOrder> Function(OrderDraft)? saveOrder;
+
+  @override
+  State<_SelectedItemsSheet> createState() => _SelectedItemsSheetState();
+}
+
+class _SelectedItemsSheetState extends State<_SelectedItemsSheet> {
+  bool _saving = false;
+  String? _saveError;
+  OrderDraft? _draft;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.cart.addListener(_clearDraft);
+    widget.cart.options.addListener(_clearDraft);
+  }
+
+  void _clearDraft() {
+    if (!_saving) _draft = null;
+  }
+
+  @override
+  void dispose() {
+    widget.cart.removeListener(_clearDraft);
+    widget.cart.options.removeListener(_clearDraft);
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    if (_saving || widget.saveOrder == null) return;
+    final cart = widget.cart;
+    try {
+      if (cart.items.values.any((item) => cart.hasConflict(item, widget.currentMenu()))) {
+        throw OrderMenuChangedException();
+      }
+      _draft ??= OrderDraft.fromCart(cart);
+    } on FormatException catch (error) {
+      setState(() => _saveError = error.message);
+      return;
+    } on OrderMenuChangedException {
+      setState(() => _saveError = '菜單已變更，請檢查已選品項');
+      return;
+    } catch (error) {
+      logMenuSync('local order draft failed type=${error.runtimeType}');
+      setState(() => _saveError = '無法建立訂單，請檢查選餐資料');
+      return;
+    }
+    setState(() {
+      _saving = true;
+      _saveError = null;
+    });
+    try {
+      final saved = await widget.saveOrder!(_draft!);
+      if (!mounted) return;
+      cart.clear();
+      Navigator.of(context).pop();
+      if (!widget.parentContext.mounted) return;
+      await showDialog<void>(
+        context: widget.parentContext,
+        builder: (context) => AlertDialog(
+          title: const Text('已存入本機'),
+          content: Text('暫定流水號 ${saved.serial}\n${saved.businessDate}\n待同步，尚未上傳或列印。'),
+          actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('確定'))],
+        ),
+      );
+    } on OrderMenuChangedException {
+      if (mounted) setState(() => _saveError = '菜單已變更，請檢查已選品項');
+    } on UnknownOrderDateException {
+      if (mounted) setState(() => _saveError = '本機舊訂單日期缺少時區，無法產生暫定流水號');
+    } catch (error) {
+      logMenuSync('local order save failed type=${error.runtimeType}');
+      if (mounted) setState(() => _saveError = '存單失敗，已保留選餐，請重試');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cart = widget.cart;
+    final currentMenu = widget.currentMenu;
+    return PopScope(
+      canPop: !_saving,
+      child: ListenableBuilder(
+        listenable: Listenable.merge([cart, cart.options, ?widget.menuUpdates]),
+        builder: (context, _) => AbsorbPointer(
+          absorbing: _saving,
+          child: SafeArea(
+            child: Padding(
+              padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+              child: SizedBox(
+                height: (MediaQuery.sizeOf(context).height - MediaQuery.viewInsetsOf(context).bottom) * 0.75,
+                child: ListView(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                      child: Row(
                         children: [
+                          Expanded(child: Text('已選品項', style: Theme.of(context).textTheme.titleLarge)),
+                          Text('NT\$ ${cart.total}', style: Theme.of(context).textTheme.titleMedium),
                           IconButton(
-                            tooltip: '減少 $name',
-                            onPressed: () => cart.removeOne(entry.key),
-                            icon: const Icon(Icons.remove_circle_outline),
-                          ),
-                          SizedBox(width: 28, child: Text('${selected.quantity}', textAlign: TextAlign.center)),
-                          IconButton(
-                            tooltip: '增加 $name',
-                            onPressed: conflict ? null : () => cart.add(item),
-                            icon: const Icon(Icons.add_circle_outline),
-                          ),
-                          IconButton(
-                            tooltip: '移除 $name',
-                            onPressed: () => cart.removeItem(entry.key),
-                            icon: const Icon(Icons.delete_outline),
+                            tooltip: '關閉已選品項',
+                            onPressed: () => Navigator.of(context).pop(),
+                            icon: const Icon(Icons.close),
                           ),
                         ],
                       ),
-                    );
-                  }),
-              ],
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                      child: SegmentedButton<ServiceType>(
+                        segments: const [
+                          ButtonSegment(value: ServiceType.dineIn, label: Text('內用')),
+                          ButtonSegment(value: ServiceType.takeout, label: Text('外帶')),
+                          ButtonSegment(value: ServiceType.uber, label: Text('Uber')),
+                        ],
+                        selected: {if (cart.options.serviceType != null) cart.options.serviceType!},
+                        emptySelectionAllowed: true,
+                        onSelectionChanged: (selection) =>
+                            cart.options.setServiceType(selection.isEmpty ? null : selection.single),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                      child: TextFormField(
+                        key: const ValueKey('order-payment'),
+                        initialValue: cart.options.paymentInput,
+                        onChanged: cart.options.setPaymentInput,
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                        decoration: InputDecoration(
+                          labelText: '實收金額',
+                          prefixIcon: const Icon(Icons.payments_outlined),
+                          errorText: cart.options.receivedAmount == null ? '金額過大，請重新輸入' : null,
+                        ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                      child: Text(
+                        cart.options.changeFor(cart.total) == null
+                            ? '找零：--'
+                            : '找零：NT\$ ${cart.options.changeFor(cart.total)}',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                      child: TextFormField(
+                        key: const ValueKey('order-mark'),
+                        initialValue: cart.options.mark,
+                        onChanged: cart.options.setMark,
+                        decoration: const InputDecoration(labelText: '標註 / 備註'),
+                      ),
+                    ),
+                    if (cart.items.isEmpty)
+                      const Padding(
+                        padding: EdgeInsets.all(24),
+                        child: Center(child: Text('尚未選餐')),
+                      )
+                    else
+                      ...cart.items.entries.map((entry) {
+                        final selected = entry.value;
+                        final item = selected.snapshot;
+                        final conflict = cart.hasConflict(selected, currentMenu());
+                        final subName = item['sub_name'] as String;
+                        final name = '${item['name']}${subName.isEmpty ? '' : '-$subName'}';
+                        return ListTile(
+                          title: Text(name),
+                          subtitle: Text(conflict ? '菜單已變更或停售，請移除後重新選擇' : '單價 NT\$ ${item['price']}'),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                tooltip: '減少 $name',
+                                onPressed: () => cart.removeOne(entry.key),
+                                icon: const Icon(Icons.remove_circle_outline),
+                              ),
+                              SizedBox(width: 28, child: Text('${selected.quantity}', textAlign: TextAlign.center)),
+                              IconButton(
+                                tooltip: '增加 $name',
+                                onPressed: conflict ? null : () => cart.add(item),
+                                icon: const Icon(Icons.add_circle_outline),
+                              ),
+                              IconButton(
+                                tooltip: '移除 $name',
+                                onPressed: () => cart.removeItem(entry.key),
+                                icon: const Icon(Icons.delete_outline),
+                              ),
+                            ],
+                          ),
+                        );
+                      }),
+                    if (_saveError != null)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                        child: Text(_saveError!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                      ),
+                    if (widget.saveOrder != null)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                        child: FilledButton.icon(
+                          onPressed: _saving ? null : _save,
+                          icon: _saving
+                              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                              : const Icon(Icons.save_outlined),
+                          label: Text(_saving ? '儲存中' : '存入本機'),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
             ),
           ),
         ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 class MenuView extends StatefulWidget {
