@@ -1,0 +1,1106 @@
+[
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded357ff"
+    },
+    "disabled": false,
+    "name": "米粉",
+    "price": {
+      "$numberInt": "50"
+    },
+    "row": "2",
+    "subName": "湯",
+    "sid": {
+      "$numberInt": "43"
+    },
+    "type": "mainProduct"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded357f3"
+    },
+    "disabled": false,
+    "name": "大陸妹",
+    "price": {
+      "$numberInt": "35"
+    },
+    "row": "2",
+    "subName": "",
+    "sid": {
+      "$numberInt": "31"
+    },
+    "type": "product"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded357e9"
+    },
+    "disabled": false,
+    "name": "金針菇",
+    "price": {
+      "$numberInt": "35"
+    },
+    "row": "1",
+    "subName": "",
+    "sid": {
+      "$numberInt": "21"
+    },
+    "type": "product"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded357e1"
+    },
+    "disabled": false,
+    "name": "素雞",
+    "price": {
+      "$numberInt": "30"
+    },
+    "row": "1",
+    "subName": "",
+    "sid": {
+      "$numberInt": "13"
+    },
+    "type": "product"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded357d6"
+    },
+    "disabled": false,
+    "name": "海帶",
+    "price": {
+      "$numberInt": "15"
+    },
+    "row": "1",
+    "subName": "",
+    "sid": {
+      "$numberInt": "2"
+    },
+    "type": "product"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded3580d"
+    },
+    "disabled": false,
+    "name": "花生豆花(甜)",
+    "price": {
+      "$numberInt": "50"
+    },
+    "row": "3",
+    "subName": "",
+    "sid": {
+      "$numberInt": "57"
+    },
+    "type": "other"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded357f9"
+    },
+    "disabled": false,
+    "name": "空心菜",
+    "price": {
+      "$numberInt": "35"
+    },
+    "row": "2",
+    "subName": "",
+    "sid": {
+      "$numberInt": "37"
+    },
+    "type": "product"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded357e4"
+    },
+    "disabled": false,
+    "name": "黑豆干",
+    "price": {
+      "$numberInt": "30"
+    },
+    "row": "1",
+    "subName": "",
+    "sid": {
+      "$numberInt": "16"
+    },
+    "type": "product"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded35810"
+    },
+    "disabled": false,
+    "name": "蘿蔔糕",
+    "price": {
+      "$numberInt": "50"
+    },
+    "row": "3",
+    "subName": "",
+    "sid": {
+      "$numberInt": "60"
+    },
+    "type": "other"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded357e7"
+    },
+    "disabled": false,
+    "name": "香菇",
+    "price": {
+      "$numberInt": "35"
+    },
+    "row": "1",
+    "subName": "",
+    "sid": {
+      "$numberInt": "19"
+    },
+    "type": "product"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded357fa"
+    },
+    "disabled": false,
+    "name": "白飯",
+    "price": {
+      "$numberInt": "20"
+    },
+    "row": "2",
+    "subName": "",
+    "sid": {
+      "$numberInt": "38"
+    },
+    "type": "mainProduct"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded357d9"
+    },
+    "disabled": false,
+    "name": "麵腸",
+    "price": {
+      "$numberInt": "25"
+    },
+    "row": "1",
+    "subName": "",
+    "sid": {
+      "$numberInt": "5"
+    },
+    "type": "product"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded357de"
+    },
+    "disabled": false,
+    "name": "油豆腐",
+    "price": {
+      "$numberInt": "25"
+    },
+    "row": "1",
+    "subName": "",
+    "sid": {
+      "$numberInt": "10"
+    },
+    "type": "product"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded357df"
+    },
+    "disabled": false,
+    "name": "紫米糕",
+    "price": {
+      "$numberInt": "30"
+    },
+    "row": "1",
+    "subName": "",
+    "sid": {
+      "$numberInt": "11"
+    },
+    "type": "product"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded35809"
+    },
+    "disabled": false,
+    "name": "蘿蔔湯",
+    "price": {
+      "$numberInt": "40"
+    },
+    "row": "3",
+    "subName": "",
+    "sid": {
+      "$numberInt": "53"
+    },
+    "type": "other"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded35802"
+    },
+    "disabled": false,
+    "name": "陽春麵",
+    "price": {
+      "$numberInt": "50"
+    },
+    "row": "2",
+    "subName": "乾",
+    "sid": {
+      "$numberInt": "46"
+    },
+    "type": "mainProduct"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded357ed"
+    },
+    "disabled": false,
+    "name": "素羊肉",
+    "price": {
+      "$numberInt": "40"
+    },
+    "row": "1",
+    "subName": "",
+    "sid": {
+      "$numberInt": "25"
+    },
+    "type": "product"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded357e5"
+    },
+    "disabled": false,
+    "name": "香菇丸",
+    "price": {
+      "$numberInt": "30"
+    },
+    "row": "1",
+    "subName": "",
+    "sid": {
+      "$numberInt": "17"
+    },
+    "type": "product"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded35803"
+    },
+    "disabled": false,
+    "name": "陽春麵",
+    "price": {
+      "$numberInt": "50"
+    },
+    "row": "2",
+    "subName": "湯",
+    "sid": {
+      "$numberInt": "47"
+    },
+    "type": "mainProduct"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded357dc"
+    },
+    "disabled": false,
+    "name": "蒟蒻絲",
+    "price": {
+      "$numberInt": "20"
+    },
+    "row": "1",
+    "subName": "",
+    "sid": {
+      "$numberInt": "8"
+    },
+    "type": "product"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded357ea"
+    },
+    "disabled": false,
+    "name": "玉米筍",
+    "price": {
+      "$numberInt": "35"
+    },
+    "row": "1",
+    "subName": "",
+    "sid": {
+      "$numberInt": "22"
+    },
+    "type": "product"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded35804"
+    },
+    "disabled": false,
+    "name": "蒸煮麵",
+    "price": {
+      "$numberInt": "55"
+    },
+    "row": "2",
+    "subName": "乾",
+    "sid": {
+      "$numberInt": "48"
+    },
+    "type": "mainProduct"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded357e0"
+    },
+    "disabled": false,
+    "name": "素肚",
+    "price": {
+      "$numberInt": "30"
+    },
+    "row": "1",
+    "subName": "",
+    "sid": {
+      "$numberInt": "12"
+    },
+    "type": "product"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded357f0"
+    },
+    "disabled": false,
+    "name": "高麗菜",
+    "price": {
+      "$numberInt": "35"
+    },
+    "row": "2",
+    "subName": "",
+    "sid": {
+      "$numberInt": "28"
+    },
+    "type": "product"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded35807"
+    },
+    "disabled": false,
+    "name": "羹麵",
+    "price": {
+      "$numberInt": "70"
+    },
+    "row": "2",
+    "subName": "",
+    "sid": {
+      "$numberInt": "51"
+    },
+    "type": "mainProduct"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded35801"
+    },
+    "disabled": false,
+    "name": "冬粉",
+    "price": {
+      "$numberInt": "50"
+    },
+    "row": "2",
+    "subName": "湯",
+    "sid": {
+      "$numberInt": "45"
+    },
+    "type": "mainProduct"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded357eb"
+    },
+    "disabled": false,
+    "name": "牛蒡排",
+    "price": {
+      "$numberInt": "40"
+    },
+    "row": "1",
+    "subName": "",
+    "sid": {
+      "$numberInt": "23"
+    },
+    "type": "product"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded357d5"
+    },
+    "disabled": false,
+    "name": "煙燻蛋",
+    "price": {
+      "$numberInt": "20"
+    },
+    "row": "1",
+    "subName": "",
+    "sid": {
+      "$numberInt": "1"
+    },
+    "type": "product"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded357e8"
+    },
+    "disabled": false,
+    "name": "杏包菇",
+    "price": {
+      "$numberInt": "35"
+    },
+    "row": "1",
+    "subName": "",
+    "sid": {
+      "$numberInt": "20"
+    },
+    "type": "product"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded35808"
+    },
+    "disabled": false,
+    "name": "猴頭菇麵線",
+    "price": {
+      "$numberInt": "80"
+    },
+    "row": "2",
+    "subName": "",
+    "sid": {
+      "$numberInt": "52"
+    },
+    "type": "mainProduct"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded357e3"
+    },
+    "disabled": false,
+    "name": "油皮",
+    "price": {
+      "$numberInt": "30"
+    },
+    "row": "1",
+    "subName": "",
+    "sid": {
+      "$numberInt": "15"
+    },
+    "type": "product"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded357fc"
+    },
+    "disabled": false,
+    "name": "油麵",
+    "price": {
+      "$numberInt": "50"
+    },
+    "row": "2",
+    "subName": "乾",
+    "sid": {
+      "$numberInt": "40"
+    },
+    "type": "mainProduct"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded3580c"
+    },
+    "disabled": false,
+    "name": "麻油猴頭菇湯",
+    "price": {
+      "$numberInt": "60"
+    },
+    "row": "3",
+    "subName": "",
+    "sid": {
+      "$numberInt": "56"
+    },
+    "type": "other"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded357ec"
+    },
+    "disabled": false,
+    "name": "猴頭菇",
+    "price": {
+      "$numberInt": "40"
+    },
+    "row": "1",
+    "subName": "",
+    "sid": {
+      "$numberInt": "24"
+    },
+    "type": "product"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded357e2"
+    },
+    "disabled": false,
+    "name": "花干",
+    "price": {
+      "$numberInt": "30"
+    },
+    "row": "1",
+    "subName": "",
+    "sid": {
+      "$numberInt": "14"
+    },
+    "type": "product"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded357fb"
+    },
+    "disabled": false,
+    "name": "素魯飯",
+    "price": {
+      "$numberInt": "45"
+    },
+    "row": "2",
+    "subName": "",
+    "sid": {
+      "$numberInt": "39"
+    },
+    "type": "mainProduct"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded357fe"
+    },
+    "disabled": false,
+    "name": "米粉",
+    "price": {
+      "$numberInt": "50"
+    },
+    "row": "2",
+    "subName": "乾",
+    "sid": {
+      "$numberInt": "42"
+    },
+    "type": "mainProduct"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded35816"
+    },
+    "disabled": false,
+    "name": "青草茶",
+    "price": {
+      "$numberInt": "40"
+    },
+    "row": "3",
+    "subName": "",
+    "sid": {
+      "$numberInt": "104"
+    },
+    "type": "other"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded35805"
+    },
+    "disabled": false,
+    "name": "蒸煮麵",
+    "price": {
+      "$numberInt": "55"
+    },
+    "row": "2",
+    "subName": "湯",
+    "sid": {
+      "$numberInt": "49"
+    },
+    "type": "mainProduct"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded357f1"
+    },
+    "disabled": false,
+    "name": "地瓜葉",
+    "price": {
+      "$numberInt": "35"
+    },
+    "row": "2",
+    "subName": "",
+    "sid": {
+      "$numberInt": "29"
+    },
+    "type": "product"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded3580f"
+    },
+    "disabled": false,
+    "name": "阿給",
+    "price": {
+      "$numberInt": "50"
+    },
+    "row": "3",
+    "subName": "",
+    "sid": {
+      "$numberInt": "59"
+    },
+    "type": "other"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded357da"
+    },
+    "disabled": false,
+    "name": "百葉豆腐",
+    "price": {
+      "$numberInt": "20"
+    },
+    "row": "1",
+    "subName": "",
+    "sid": {
+      "$numberInt": "6"
+    },
+    "type": "product"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded357fd"
+    },
+    "disabled": false,
+    "name": "油麵",
+    "price": {
+      "$numberInt": "50"
+    },
+    "row": "2",
+    "subName": "湯",
+    "sid": {
+      "$numberInt": "41"
+    },
+    "type": "mainProduct"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded357e6"
+    },
+    "disabled": false,
+    "name": "木耳",
+    "price": {
+      "$numberInt": "35"
+    },
+    "row": "1",
+    "subName": "",
+    "sid": {
+      "$numberInt": "18"
+    },
+    "type": "product"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded357f2"
+    },
+    "disabled": false,
+    "name": "A菜",
+    "price": {
+      "$numberInt": "35"
+    },
+    "row": "2",
+    "subName": "",
+    "sid": {
+      "$numberInt": "30"
+    },
+    "type": "product"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded357f8"
+    },
+    "disabled": false,
+    "name": "川七",
+    "price": {
+      "$numberInt": "35"
+    },
+    "row": "2",
+    "subName": "",
+    "sid": {
+      "$numberInt": "36"
+    },
+    "type": "product"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded357db"
+    },
+    "disabled": false,
+    "name": "素腰花",
+    "price": {
+      "$numberInt": "20"
+    },
+    "row": "1",
+    "subName": "",
+    "sid": {
+      "$numberInt": "7"
+    },
+    "type": "product"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded357f5"
+    },
+    "disabled": false,
+    "name": "皇宮菜",
+    "price": {
+      "$numberInt": "35"
+    },
+    "row": "2",
+    "subName": "",
+    "sid": {
+      "$numberInt": "33"
+    },
+    "type": "product"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded35806"
+    },
+    "disabled": false,
+    "name": "茶油麵線",
+    "price": {
+      "$numberInt": "50"
+    },
+    "row": "2",
+    "subName": "",
+    "sid": {
+      "$numberInt": "50"
+    },
+    "type": "mainProduct"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded357d7"
+    },
+    "disabled": false,
+    "name": "蘿蔔",
+    "price": {
+      "$numberInt": "20"
+    },
+    "row": "1",
+    "subName": "",
+    "sid": {
+      "$numberInt": "3"
+    },
+    "type": "product"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded357f4"
+    },
+    "disabled": false,
+    "name": "紅鳳菜",
+    "price": {
+      "$numberInt": "35"
+    },
+    "row": "2",
+    "subName": "",
+    "sid": {
+      "$numberInt": "32"
+    },
+    "type": "product"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded357ee"
+    },
+    "disabled": false,
+    "name": "滷味麵",
+    "price": {
+      "$numberInt": "40"
+    },
+    "row": "1",
+    "subName": "",
+    "sid": {
+      "$numberInt": "26"
+    },
+    "type": "other"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded35800"
+    },
+    "disabled": false,
+    "name": "冬粉",
+    "price": {
+      "$numberInt": "50"
+    },
+    "row": "2",
+    "subName": "乾",
+    "sid": {
+      "$numberInt": "44"
+    },
+    "type": "mainProduct"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded35811"
+    },
+    "disabled": false,
+    "name": "芋頭糕",
+    "price": {
+      "$numberInt": "60"
+    },
+    "row": "3",
+    "subName": "",
+    "sid": {
+      "$numberInt": "61"
+    },
+    "type": "other"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded3580e"
+    },
+    "disabled": false,
+    "name": "花生豆花(鹹)",
+    "price": {
+      "$numberInt": "50"
+    },
+    "row": "3",
+    "subName": "",
+    "sid": {
+      "$numberInt": "58"
+    },
+    "type": "other"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded35817"
+    },
+    "disabled": false,
+    "name": "加價",
+    "price": {
+      "$numberInt": "1"
+    },
+    "row": "3",
+    "subName": "",
+    "sid": {
+      "$numberInt": "200"
+    },
+    "type": "other"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded357f6"
+    },
+    "disabled": false,
+    "name": "莧菜",
+    "price": {
+      "$numberInt": "35"
+    },
+    "row": "2",
+    "subName": "",
+    "sid": {
+      "$numberInt": "34"
+    },
+    "type": "product"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded357dd"
+    },
+    "disabled": false,
+    "name": "小豆干",
+    "price": {
+      "$numberInt": "25"
+    },
+    "row": "1",
+    "subName": "",
+    "sid": {
+      "$numberInt": "9"
+    },
+    "type": "product"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded357ef"
+    },
+    "disabled": false,
+    "name": "花椰菜",
+    "price": {
+      "$numberInt": "35"
+    },
+    "row": "2",
+    "subName": "",
+    "sid": {
+      "$numberInt": "27"
+    },
+    "type": "product"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded35812"
+    },
+    "disabled": false,
+    "name": "甜不辣",
+    "price": {
+      "$numberInt": "60"
+    },
+    "row": "3",
+    "subName": "",
+    "sid": {
+      "$numberInt": "62"
+    },
+    "type": "other"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded35814"
+    },
+    "disabled": false,
+    "name": "紅茶",
+    "price": {
+      "$numberInt": "25"
+    },
+    "row": "3",
+    "subName": "",
+    "sid": {
+      "$numberInt": "102"
+    },
+    "type": "other"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded35813"
+    },
+    "disabled": false,
+    "name": "Uber Eat A",
+    "price": {
+      "$numberInt": "150"
+    },
+    "row": "3",
+    "subName": "",
+    "sid": {
+      "$numberInt": "101"
+    },
+    "type": "other"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded357d8"
+    },
+    "disabled": false,
+    "name": "豆包",
+    "price": {
+      "$numberInt": "25"
+    },
+    "row": "1",
+    "subName": "",
+    "sid": {
+      "$numberInt": "4"
+    },
+    "type": "product"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded35815"
+    },
+    "disabled": false,
+    "name": "蜂蜜水",
+    "price": {
+      "$numberInt": "50"
+    },
+    "row": "3",
+    "subName": "",
+    "sid": {
+      "$numberInt": "103"
+    },
+    "type": "other"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded3580a"
+    },
+    "disabled": false,
+    "name": "丸子湯",
+    "price": {
+      "$numberInt": "40"
+    },
+    "row": "3",
+    "subName": "",
+    "sid": {
+      "$numberInt": "54"
+    },
+    "type": "other"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded3580b"
+    },
+    "disabled": false,
+    "name": "羹湯",
+    "price": {
+      "$numberInt": "55"
+    },
+    "row": "3",
+    "subName": "",
+    "sid": {
+      "$numberInt": "55"
+    },
+    "type": "other"
+  },
+  {
+    "_id": {
+      "$oid": "63db589836ebd3c2ded357f7"
+    },
+    "disabled": false,
+    "name": "山茼蒿",
+    "price": {
+      "$numberInt": "35"
+    },
+    "row": "2",
+    "subName": "",
+    "sid": {
+      "$numberInt": "35"
+    },
+    "type": "product"
+  },
+  {
+    "_id": {
+      "$oid": "65c726cb5a44a6f160fea38d"
+    },
+    "disabled": false,
+    "name": "悶苦瓜",
+    "price": {
+      "$numberInt": "40"
+    },
+    "row": "3",
+    "subName": "",
+    "sid": {
+      "$numberInt": "63"
+    },
+    "type": "other"
+  },
+  {
+    "_id": {
+      "$oid": "665b1dfba7d9801fecdd6fa5"
+    },
+    "disabled": false,
+    "name": "素肉圓",
+    "price": {
+      "$numberInt": "45"
+    },
+    "row": "3",
+    "subName": "",
+    "sid": {
+      "$numberInt": "100"
+    },
+    "type": "other"
+  }
+]

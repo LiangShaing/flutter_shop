@@ -2,6 +2,14 @@
 
 本文件只供**獨立的測試 Supabase 專案**使用。不要在含有真實顧客訂單的正式專案開啟匿名訂單讀取。
 
+## 菜單同步
+
+執行初始 migration 後，另在 Supabase SQL Editor 執行 `migrations/20261113000000_menu_realtime.sql`，將菜單與分類加入 Realtime publication。App 會先顯示 SQLite 快取，再分頁讀取雲端可見菜單；訂閱、回到前景、手動重試及定期核對會重新抓取快照。離線首次啟動使用 bundled 菜單，並標示為本機預設菜單。
+
+目前匿名 RLS 只允許讀取可供應且分類啟用的菜單。雲端快取因此只代表目前帳號可見的品項，停售或被分類隱藏的品項會從快取移除，不能據此判斷雲端是否刪除；若需店家查看所有停售品項，須另設店家授權與政策。現有 `display_name` 暫存舊菜單的 `subName`，不是完整品名。此功能尚不會上傳菜單、訂單或 outbox。
+
+若 Realtime 顯示 `channelError` 且分類為 `unclassified`，可在 debug 啟動指令中額外加入 `--dart-define=MENU_SYNC_VERBOSE_REALTIME_ERRORS=true`。新增或移除參數後需完整停止並重新啟動 App。詳細錯誤預設關閉，且只在 debug 模式輸出；雖然會遮罩常見憑證與 URL，仍可能包含其他敏感資料，分享 log 前請自行檢查及刪除敏感內容。排查完成後移除該參數。
+
 ## 前置條件
 
 1. 已在測試 Supabase 專案執行 `migrations/20261112000000_initial_schema.sql`。

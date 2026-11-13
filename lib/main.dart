@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import 'orders_page.dart';
+import 'menu_page.dart';
 
 const _supabaseUrl = String.fromEnvironment('SUPABASE_URL');
 const _supabasePublishableKey = String.fromEnvironment('SUPABASE_PUBLISHABLE_KEY');
@@ -30,7 +30,7 @@ class FlutterShopApp extends StatelessWidget {
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF176B58), surface: const Color(0xFFF7F8F6)),
       ),
-      home: isSupabaseConfigured ? OrdersPage(client: Supabase.instance.client) : const SupabaseSetupPage(),
+      home: MenuPage(client: isSupabaseConfigured ? Supabase.instance.client : null),
     );
   }
 }
