@@ -1,8 +1,10 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart' hide MenuController;
+import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'cart_controller.dart';
 import 'local_database.dart';
 import 'main.dart' show SupabaseSetupPage;
 import 'menu_controller.dart';
@@ -18,6 +20,7 @@ class MenuPage extends StatefulWidget {
 }
 
 class _MenuPageState extends State<MenuPage> with WidgetsBindingObserver {
+  final CartController _cart = CartController();
   MenuController? _controller;
   RealtimeChannel? _channel;
   Timer? _timer;
@@ -99,6 +102,7 @@ class _MenuPageState extends State<MenuPage> with WidgetsBindingObserver {
     final channel = _channel;
     if (channel != null) unawaited(widget.client!.removeChannel(channel));
     unawaited(_startup.whenComplete(() => _controller?.close()));
+    _cart.dispose();
     super.dispose();
   }
 
@@ -107,8 +111,32 @@ class _MenuPageState extends State<MenuPage> with WidgetsBindingObserver {
     final controller = _controller;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('菜單'),
+        backgroundColor: const Color.fromRGBO(201, 113, 23, 1),
+        foregroundColor: Colors.white,
+        titleSpacing: 12,
+        title: const FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerLeft, child: Text('千囍蔬食堂')),
         actions: [
+          SizedBox(
+            width: MediaQuery.sizeOf(context).width < 400 ? 72 : 180,
+            height: kToolbarHeight,
+            child: controller == null
+                ? MenuSyncStatus(
+                    state: MenuSyncState.loading,
+                    items: const [],
+                    realtimeConfigured: widget.client != null,
+                  )
+                : ListenableBuilder(
+                    listenable: controller,
+                    builder: (context, _) => MenuSyncStatus(
+                      state: controller.state,
+                      items: controller.items,
+                      realtimeConfigured: widget.client != null,
+                      realtimeStatus: _realtimeStatus,
+                      lastRealtimeEvent: _lastRealtimeEvent,
+                    ),
+                  ),
+          ),
+          MenuCartAction(cart: _cart, menuUpdates: controller, currentMenu: () => controller?.items ?? const []),
           if (widget.client != null)
             IconButton(
               tooltip: '訂單',
@@ -139,32 +167,26 @@ class _MenuPageState extends State<MenuPage> with WidgetsBindingObserver {
           ? const Center(child: CircularProgressIndicator())
           : ListenableBuilder(
               listenable: controller,
-              builder: (context, _) => MenuView(
-                items: controller.items,
-                state: controller.state,
-                realtimeStatus: _realtimeStatus,
-                realtimeConfigured: widget.client != null,
-                lastRealtimeEvent: _lastRealtimeEvent,
-              ),
+              builder: (context, _) => MenuView(items: controller.items, state: controller.state, cart: _cart),
             ),
     );
   }
 }
 
-class MenuView extends StatelessWidget {
-  const MenuView({
+class MenuSyncStatus extends StatelessWidget {
+  const MenuSyncStatus({
     super.key,
-    required this.items,
     required this.state,
+    required this.items,
+    required this.realtimeConfigured,
     this.realtimeStatus,
-    this.realtimeConfigured = false,
     this.lastRealtimeEvent,
   });
 
-  final List<Map<String, Object?>> items;
   final MenuSyncState state;
-  final RealtimeSubscribeStatus? realtimeStatus;
+  final List<Map<String, Object?>> items;
   final bool realtimeConfigured;
+  final RealtimeSubscribeStatus? realtimeStatus;
   final DateTime? lastRealtimeEvent;
 
   @override
@@ -184,62 +206,385 @@ class MenuView extends StatelessWidget {
         : realtimeStatus == null
         ? '即時連線中'
         : '即時連線中斷，使用定期更新';
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-          child: Row(
-            children: [
-              Icon(state == MenuSyncState.failed ? Icons.cloud_off_outlined : Icons.cloud_outlined, size: 18),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(status),
-                    Text(realtimeLabel, style: Theme.of(context).textTheme.bodySmall),
-                    if (lastRealtimeEvent != null)
-                      Text(
-                        '最近即時事件 ${TimeOfDay.fromDateTime(lastRealtimeEvent!).format(context)}',
-                        style: Theme.of(context).textTheme.bodySmall,
+    final eventLabel = lastRealtimeEvent == null
+        ? null
+        : '最近即時事件 ${TimeOfDay.fromDateTime(lastRealtimeEvent!).format(context)}';
+    return Tooltip(
+      message: [status, realtimeLabel, ?eventLabel].join('\n'),
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        alignment: Alignment.centerRight,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Text(status, style: const TextStyle(fontSize: 11, color: Colors.white)),
+            Text(realtimeLabel, style: const TextStyle(fontSize: 11, color: Colors.white)),
+            if (eventLabel != null) Text(eventLabel, style: const TextStyle(fontSize: 11, color: Colors.white)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class MenuCartAction extends StatelessWidget {
+  const MenuCartAction({super.key, required this.cart, required this.currentMenu, this.menuUpdates});
+
+  final CartController cart;
+  final List<Map<String, Object?>> Function() currentMenu;
+  final Listenable? menuUpdates;
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: Listenable.merge([cart, ?menuUpdates]),
+    builder: (context, _) {
+      final conflict = cart.items.values.any((item) => cart.hasConflict(item, currentMenu()));
+      return Tooltip(
+        message: conflict ? '查看已選：菜單有變更，請檢查已選品項' : '查看已選',
+        child: Semantics(
+          label: '已選 ${cart.quantity} 項，總額 ${cart.total} 元${conflict ? '，菜單有變更' : ''}',
+          button: true,
+          enabled: cart.quantity > 0,
+          child: InkWell(
+            onTap: cart.quantity == 0 ? null : () => _showSelectedItems(context, cart, currentMenu, menuUpdates),
+            child: SizedBox(
+              width: 60,
+              height: kToolbarHeight,
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: SizedBox(
+                  width: 60,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Badge(
+                        isLabelVisible: cart.quantity > 0,
+                        label: Text(cart.quantity > 99 ? '99+' : '${cart.quantity}'),
+                        child: Icon(conflict ? Icons.warning_amber_outlined : Icons.shopping_basket_outlined, size: 22),
                       ),
+                      Text('NT\$ ${cart.total}', style: const TextStyle(fontSize: 10, color: Colors.white)),
+                      if (conflict) const Text('需確認', style: TextStyle(fontSize: 10, color: Colors.white)),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    },
+  );
+}
+
+void _showSelectedItems(
+  BuildContext context,
+  CartController cart,
+  List<Map<String, Object?>> Function() currentMenu,
+  Listenable? menuUpdates,
+) {
+  showModalBottomSheet<void>(
+    context: context,
+    showDragHandle: true,
+    isScrollControlled: true,
+    builder: (context) => ListenableBuilder(
+      listenable: Listenable.merge([cart, ?menuUpdates]),
+      builder: (context, _) => SafeArea(
+        child: SizedBox(
+          height: MediaQuery.sizeOf(context).height * 0.65,
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                child: Row(
+                  children: [
+                    Expanded(child: Text('已選品項', style: Theme.of(context).textTheme.titleLarge)),
+                    Text('NT\$ ${cart.total}', style: Theme.of(context).textTheme.titleMedium),
                   ],
                 ),
+              ),
+              Expanded(
+                child: cart.items.isEmpty
+                    ? const Center(child: Text('尚未選餐'))
+                    : ListView(
+                        children: cart.items.entries.map((entry) {
+                          final selected = entry.value;
+                          final item = selected.snapshot;
+                          final conflict = cart.hasConflict(selected, currentMenu());
+                          final subName = item['sub_name'] as String;
+                          final name = '${item['name']}${subName.isEmpty ? '' : '-$subName'}';
+                          return ListTile(
+                            title: Text(name),
+                            subtitle: Text(conflict ? '菜單已變更或停售，請移除後重新選擇' : '單價 NT\$ ${item['price']}'),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  tooltip: '減少 $name',
+                                  onPressed: () => cart.removeOne(entry.key),
+                                  icon: const Icon(Icons.remove_circle_outline),
+                                ),
+                                SizedBox(width: 28, child: Text('${selected.quantity}', textAlign: TextAlign.center)),
+                                IconButton(
+                                  tooltip: '增加 $name',
+                                  onPressed: conflict ? null : () => cart.add(item),
+                                  icon: const Icon(Icons.add_circle_outline),
+                                ),
+                                IconButton(
+                                  tooltip: '移除 $name',
+                                  onPressed: () => cart.removeItem(entry.key),
+                                  icon: const Icon(Icons.delete_outline),
+                                ),
+                              ],
+                            ),
+                          );
+                        }).toList(),
+                      ),
               ),
             ],
           ),
         ),
-        Expanded(
-          child: items.isEmpty
-              ? Center(child: Text(state == MenuSyncState.loading ? '載入中' : '目前沒有可顯示的菜單'))
-              : ListView.builder(
-                  itemCount: items.length,
-                  itemBuilder: (context, index) {
-                    final item = items[index];
-                    final subName = item['sub_name'] as String;
-                    final row = item['menu_row'] as String;
-                    final previousRow = index == 0 ? null : items[index - 1]['menu_row'];
-                    final available = item['is_available'] == 1;
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        if (row != previousRow)
-                          Padding(
-                            padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
-                            child: Text('第 $row 列', style: Theme.of(context).textTheme.titleMedium),
+      ),
+    ),
+  );
+}
+
+class MenuView extends StatefulWidget {
+  const MenuView({super.key, required this.items, required this.state, this.cart});
+
+  final List<Map<String, Object?>> items;
+  final MenuSyncState state;
+  final CartController? cart;
+
+  @override
+  State<MenuView> createState() => _MenuViewState();
+}
+
+class _MenuViewState extends State<MenuView> {
+  late CartController _cart;
+
+  @override
+  void initState() {
+    super.initState();
+    _cart = widget.cart ?? CartController();
+  }
+
+  @override
+  void didUpdateWidget(covariant MenuView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.cart != widget.cart) {
+      if (oldWidget.cart == null) _cart.dispose();
+      _cart = widget.cart ?? CartController();
+    }
+  }
+
+  @override
+  void dispose() {
+    if (widget.cart == null) _cart.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final items = widget.items;
+    final state = widget.state;
+    return ListenableBuilder(
+      listenable: _cart,
+      builder: (context, _) => Column(
+        children: [
+          Expanded(
+            child: items.isEmpty
+                ? Center(child: Text(state == MenuSyncState.loading ? '載入中' : '目前沒有可顯示的菜單'))
+                : LayoutBuilder(
+                    builder: (context, constraints) => SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: SizedBox(
+                        width: constraints.maxWidth < 600 ? 600 : constraints.maxWidth,
+                        child: SingleChildScrollView(
+                          padding: EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: ['1', '2', '3'].map((row) {
+                              final rowItems = items.where((item) => item['menu_row'] == row);
+                              return Expanded(
+                                child: Column(
+                                  children: rowItems.map((item) {
+                                    final selected = _cart.items[cartItemKey(item)];
+                                    final conflict = selected != null && _cart.hasConflict(selected, items);
+                                    return _MenuTableRow(
+                                      key: ValueKey(cartItemKey(item)),
+                                      item: item,
+                                      quantity: _cart.quantityFor(item),
+                                      conflict: conflict,
+                                      onQuantityChanged: (quantity) => _cart.setQuantity(item, quantity),
+                                    );
+                                  }).toList(),
+                                ),
+                              );
+                            }).toList(),
                           ),
-                        ListTile(
-                          enabled: available,
-                          title: Text('${item['name']}${subName.isEmpty ? '' : '-$subName'}'),
-                          subtitle: available ? null : const Text('停售'),
-                          trailing: Text('NT\$ ${item['price']}'),
                         ),
-                      ],
-                    );
-                  },
-                ),
-        ),
-      ],
+                      ),
+                    ),
+                  ),
+          ),
+        ],
+      ),
     );
   }
+}
+
+class _MenuTableRow extends StatelessWidget {
+  const _MenuTableRow({
+    super.key,
+    required this.item,
+    required this.quantity,
+    required this.conflict,
+    required this.onQuantityChanged,
+  });
+
+  final Map<String, Object?> item;
+  final int quantity;
+  final bool conflict;
+  final bool Function(int) onQuantityChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final subName = item['sub_name'] as String;
+    final name = '${item['name']}${subName.isEmpty ? '' : '-$subName'}';
+    final available = item['is_available'] == 1;
+    const textStyle = TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: Colors.black);
+    return Container(
+      height: 40,
+      decoration: BoxDecoration(border: Border.all(color: Colors.black, width: 0.5)),
+      child: Row(
+        children: [
+          Expanded(
+            flex: 7,
+            child: Container(
+              height: double.infinity,
+              color: item['item_type'] == 'mainProduct' ? Colors.amberAccent : null,
+              child: Tooltip(
+                message: conflict ? '$name：菜單已變更，請檢查已選品項' : (!available ? '$name：停售' : name),
+                child: Center(
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text.rich(
+                      TextSpan(
+                        text: item['name'] as String,
+                        style: textStyle,
+                        children: [
+                          if (subName.isNotEmpty)
+                            TextSpan(
+                              text: '-$subName',
+                              style: TextStyle(color: subName == '乾' ? Colors.blueGrey : Colors.black),
+                            ),
+                          if (!available)
+                            const TextSpan(
+                              text: ' 停售',
+                              style: TextStyle(color: Colors.red),
+                            ),
+                        ],
+                      ),
+                      maxLines: 1,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Expanded(
+            flex: 2,
+            child: Container(
+              height: double.infinity,
+              decoration: const BoxDecoration(
+                border: Border.symmetric(vertical: BorderSide(color: Colors.black, width: 0.5)),
+              ),
+              child: Center(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text('${item['price']}', style: textStyle),
+                ),
+              ),
+            ),
+          ),
+          Expanded(
+            flex: 3,
+            child: _QuantityField(
+              itemKey: cartItemKey(item),
+              name: name,
+              quantity: quantity,
+              enabled: available && !conflict,
+              onChanged: onQuantityChanged,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _QuantityField extends StatefulWidget {
+  const _QuantityField({
+    required this.itemKey,
+    required this.name,
+    required this.quantity,
+    required this.enabled,
+    required this.onChanged,
+  });
+
+  final String itemKey;
+  final String name;
+  final int quantity;
+  final bool enabled;
+  final bool Function(int) onChanged;
+
+  @override
+  State<_QuantityField> createState() => _QuantityFieldState();
+}
+
+class _QuantityFieldState extends State<_QuantityField> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.quantity == 0 ? '' : '${widget.quantity}');
+  }
+
+  @override
+  void didUpdateWidget(covariant _QuantityField oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.quantity != widget.quantity && int.tryParse(_controller.text) != widget.quantity) {
+      _controller.text = widget.quantity == 0 ? '' : '${widget.quantity}';
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    label: '數量 ${widget.name}',
+    child: TextField(
+      key: ValueKey('quantity:${widget.itemKey}'),
+      controller: _controller,
+      enabled: widget.enabled,
+      textAlign: TextAlign.center,
+      keyboardType: TextInputType.number,
+      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: Colors.red),
+      decoration: const InputDecoration(isDense: true, border: InputBorder.none, contentPadding: EdgeInsets.zero),
+      onChanged: (value) {
+        final quantity = value.isEmpty ? 0 : int.tryParse(value);
+        if (quantity == null || !widget.onChanged(quantity)) {
+          _controller.text = widget.quantity == 0 ? '' : '${widget.quantity}';
+          _controller.selection = TextSelection.collapsed(offset: _controller.text.length);
+        }
+      },
+    ),
+  );
 }
